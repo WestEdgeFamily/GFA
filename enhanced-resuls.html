@@ -1,0 +1,48 @@
+<div id="enhancedResult" class="result-container">
+  <div class="result-section">
+    <div class="result-header">
+      <span id="resultIcon"></span>
+      <span id="resultTitle"></span>
+    </div>
+    
+    <div id="resultExplanation" class="result-explanation"></div>
+    
+    <div class="ingredients-analysis">
+      <div id="flaggedIngredientsContainer">
+        <h3 class="section-title">Flagged Ingredients</h3>
+        <table class="ingredient-table" id="flaggedIngredientsTable">
+          <thead>
+            <tr>
+              <th>Ingredient</th>
+              <th>Risk Level</th>
+              <th>Explanation</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="flaggedIngredientsBody"></tbody>
+        </table>
+      </div>
+      
+      <div id="safeIngredientsContainer">
+        <h3 class="section-title">Recognized Safe Ingredients</h3>
+        <div class="safe-ingredients-list" id="safeIngredientsList"></div>
+      </div>
+      
+      <div id="unrecognizedIngredientsContainer">
+        <h3 class="section-title">Unrecognized Ingredients</h3>
+        <p class="caution-note">These ingredients weren't in our database. Research before consuming:</p>
+        <div class="unrecognized-ingredients-list" id="unrecognizedIngredientsList"></div>
+      </div>
+    </div>
+    
+    <div class="cross-contamination-notice">
+      <h3 class="section-title">Cross-Contamination Risk</h3>
+      <p>Even if ingredients appear safe, manufacturing processes can introduce gluten. Look for "May contain" statements or contact manufacturer for dedicated gluten-free facilities.</p>
+    </div>
+    
+    <div class="next-steps">
+      <h3 class="section-title">Recommended Next Steps</h3>
+      <ul id="recommendedStepsList"></ul>
+    </div>
+  </div>
+</div>
