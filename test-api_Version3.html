@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gluten API Tester</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        textarea { width: 100%; height: 100px; margin: 10px 0; padding: 8px; font-size: 16px; }
+        button { padding: 10px 20px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #45a049; }
+        #result { border: 1px solid #ccc; padding: 15px; margin-top: 20px; border-radius: 5px; }
+        .safe { background-color: #d4edda; border-color: #c3e6cb; }
+        .unsafe { background-color: #f8d7da; border-color: #f5c6cb; }
+        .ambiguous { background-color: #fff3cd; border-color: #ffeeba; }
+        .result-header { font-size: 20px; font-weight: bold; margin-bottom: 15px; }
+        .ingredient-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .ingredient-table th, .ingredient-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        .ingredient-table th { background-color: #f2f2f2; }
+        .high-confidence { color: #d9534f; font-weight: bold; }
+        .medium-confidence { color: #f0ad4e; }
+        .low-confidence { color: #5bc0de; }
+    </style>
+</head>
+<body>
+    <h1>Gluten-Free API Tester</h1>
+    <p>Enter ingredients to test:</p>
+    <textarea id="ingredients" placeholder="Enter ingredients list here..."></textarea>
+    <button onclick="testIngredients()">Analyze</button>
+    <h2>Result:</h2>
+    <div id="result">Results will appear here...</div>
+    
+    <script>
+        async function testIngredients() {
+            const ingredientsText = document.getElementById('ingredients').value;
+            const resultDiv = document.getElementById('result');
+            
+            try {
+                // Correct API URL
+                const apiUrl = 'https://gluten-free-scanner-api.onrender.com/analyze';
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ingredients_text: ingredientsText })
+                });
+                
+                const data = await response.json();
+                
+                // Format the result for better readability
+                let resultHTML = '';
+                
+                // Set appropriate class for styling
+                if (data.is_gluten_free) {
+                    resultDiv.className = 'safe';
+                    resultHTML += '<div class="result-header">✅ SAFE: ' + data.message + '</div>';
+                } else if (data.flagged_ingredients.some(i => i.confidence > 0.7)) {
+                    resultDiv.className = 'unsafe';
+                    resultHTML += '<div class="result-header">❌ UNSAFE: ' + data.message + '</div>';
+                } else {
+                    resultDiv.className = 'ambiguous';
+                    resultHTML += '<div class="result-header">⚠️ CAUTION: ' + data.message + '</div>';
+                }
+                
+                // Add flagged ingredients table if any
+                if (data.flagged_ingredients && data.flagged_ingredients.length > 0) {
+                    resultHTML += '<h3>Flagged Ingredients:</h3>';
+                    resultHTML += '<table class="ingredient-table">';
+                    resultHTML += '<tr><th>Ingredient</th><th>Reason</th><th>Confidence</th></tr>';
+                    
+                    data.flagged_ingredients.forEach(ingredient => {
+                        let confidenceClass = '';
+                        let confidenceText = '';
+                        
+                        if (ingredient.confidence >= 0.9) {
+                            confidenceClass = 'high-confidence';
+                            confidenceText = 'High (' + (ingredient.confidence * 100) + '%)';
+                        } else if (ingredient.confidence >= 0.7) {
+                            confidenceClass = 'medium-confidence';
+                            confidenceText = 'Medium (' + (ingredient.confidence * 100) + '%)';
+                        } else {
+                            confidenceClass = 'low-confidence';
+                            confidenceText = 'Low (' + (ingredient.confidence * 100) + '%)';
+                        }
+                        
+                        resultHTML += '<tr>';
+                        resultHTML += '<td>' + ingredient.name + '</td>';
+                        resultHTML += '<td>' + ingredient.reason + '</td>';
+                        resultHTML += '<td class="' + confidenceClass + '">' + confidenceText + '</td>';
+                        resultHTML += '</tr>';
+                    });
+                    
+                    resultHTML += '</table>';
+                }
+                
+                // Add raw JSON for reference (collapsible)
+                resultHTML += '<details style="margin-top: 20px;">';
+                resultHTML += '<summary>Show Raw JSON Response</summary>';
+                resultHTML += '<pre style="background-color: #f8f9fa; padding: 10px; overflow: auto;">' + 
+                             JSON.stringify(data, null, 2) + '</pre>';
+                resultHTML += '</details>';
+                
+                resultDiv.innerHTML = resultHTML;
+            } catch (error) {
+                resultDiv.className = '';
+                resultDiv.innerHTML = '<div style="color: red;">Error: ' + error.message + '</div>';
+            }
+        }
+    </script>
+</body>
+</html>
