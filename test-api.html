@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Gluten API Tester</title>
+    <title>Gluten-Free Scanner Tester</title>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
     <style>
         body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
         textarea { width: 100%; height: 100px; margin: 10px 0; padding: 8px; font-size: 16px; }
-        button { padding: 10px 20px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-size: 16px; }
+        button { padding: 10px 20px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-size: 16px; margin-right: 10px; }
         button:hover { background-color: #45a049; }
+        button.secondary { background-color: #2196F3; }
+        button.secondary:hover { background-color: #0b7dda; }
         #result { border: 1px solid #ccc; padding: 15px; margin-top: 20px; border-radius: 5px; }
         .safe { background-color: #d4edda; border-color: #c3e6cb; }
         .unsafe { background-color: #f8d7da; border-color: #f5c6cb; }
@@ -18,23 +21,196 @@
         .high-confidence { color: #d9534f; font-weight: bold; }
         .medium-confidence { color: #f0ad4e; }
         .low-confidence { color: #5bc0de; }
+        .tab { display: inline-block; padding: 10px 15px; cursor: pointer; border: 1px solid #ccc; border-bottom: none; margin-right: 5px; border-radius: 5px 5px 0 0; }
+        .active-tab { background-color: #f0f0f0; font-weight: bold; }
+        .tab-content { display: none; padding: 20px; border: 1px solid #ccc; border-radius: 0 5px 5px 5px; }
+        .active-content { display: block; }
+        #imagePreview { max-width: 100%; margin: 15px 0; display: none; }
+        .progress-container { width: 100%; background-color: #f1f1f1; border-radius: 5px; margin: 10px 0; }
+        .progress-bar { height: 20px; border-radius: 5px; width: 0%; background-color: #4CAF50; text-align: center; line-height: 20px; color: white; }
+        .loading { display: none; margin: 15px 0; }
     </style>
 </head>
 <body>
-    <h1>Gluten-Free API Tester</h1>
-    <p>Enter ingredients to test:</p>
-    <textarea id="ingredients" placeholder="Enter ingredients list here..."></textarea>
-    <button onclick="testIngredients()">Analyze</button>
+    <h1>Gluten-Free Scanner Tester</h1>
+    
+    <div>
+        <div class="tab active-tab" onclick="switchTab('textInput')">Text Input</div>
+        <div class="tab" onclick="switchTab('photoInput')">Photo Upload</div>
+    </div>
+    
+    <div id="textInput" class="tab-content active-content">
+        <p>Enter ingredients text:</p>
+        <textarea id="ingredients" placeholder="Enter ingredients list here..."></textarea>
+        <button onclick="testIngredients()">Analyze Text</button>
+    </div>
+    
+    <div id="photoInput" class="tab-content">
+        <p>Upload a photo of ingredients list:</p>
+        <input type="file" id="imageUpload" accept="image/*">
+        <p>Or take a photo with your camera:</p>
+        <button class="secondary" onclick="openCamera()">Open Camera</button>
+        <div id="cameraContainer" style="display:none;">
+            <video id="video" width="400" height="300" autoplay></video>
+            <br>
+            <button onclick="takePhoto()">Take Photo</button>
+            <button onclick="closeCamera()">Cancel</button>
+        </div>
+        <img id="imagePreview" alt="Uploaded image preview">
+        <div class="loading" id="scanningMessage">
+            <p>Scanning image for text...</p>
+            <div class="progress-container">
+                <div class="progress-bar" id="ocrProgress">0%</div>
+            </div>
+        </div>
+        <p>Extracted text:</p>
+        <textarea id="extractedText" placeholder="Text will appear here after scanning..." readonly></textarea>
+        <div>
+            <button id="scanButton" onclick="scanImage()" disabled>Scan Image</button>
+            <button id="useTextButton" onclick="useExtractedText()" disabled>Use This Text</button>
+        </div>
+    </div>
+    
     <h2>Result:</h2>
     <div id="result">Results will appear here...</div>
     
     <script>
+        // For camera access
+        let stream = null;
+        let videoElement = document.getElementById('video');
+        
+        // Switch between tabs
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active-content');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active-tab');
+            });
+            
+            document.getElementById(tabId).classList.add('active-content');
+            Array.from(document.querySelectorAll('.tab')).find(tab => tab.textContent.includes(tabId === 'textInput' ? 'Text' : 'Photo')).classList.add('active-tab');
+        }
+        
+        // Open camera
+        function openCamera() {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(function(s) {
+                    stream = s;
+                    videoElement.srcObject = stream;
+                    document.getElementById('cameraContainer').style.display = 'block';
+                })
+                .catch(function(error) {
+                    alert("Error accessing camera: " + error.message);
+                });
+        }
+        
+        // Close camera
+        function closeCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                document.getElementById('cameraContainer').style.display = 'none';
+            }
+        }
+        
+        // Take photo from camera
+        function takePhoto() {
+            const canvas = document.createElement('canvas');
+            canvas.width = videoElement.videoWidth;
+            canvas.height = videoElement.videoHeight;
+            canvas.getContext('2d').drawImage(videoElement, 0, 0);
+            
+            // Convert to image and display
+            const imgPreview = document.getElementById('imagePreview');
+            imgPreview.src = canvas.toDataURL('image/jpeg');
+            imgPreview.style.display = 'block';
+            
+            // Enable scan button
+            document.getElementById('scanButton').disabled = false;
+            
+            // Close camera
+            closeCamera();
+        }
+        
+        // Handle image upload
+        document.getElementById('imageUpload').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const imgPreview = document.getElementById('imagePreview');
+                    imgPreview.src = e.target.result;
+                    imgPreview.style.display = 'block';
+                    document.getElementById('scanButton').disabled = false;
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Scan image using Tesseract.js
+        function scanImage() {
+            const imgPreview = document.getElementById('imagePreview');
+            if (!imgPreview.src) {
+                alert("Please upload an image first.");
+                return;
+            }
+            
+            // Show scanning message
+            document.getElementById('scanningMessage').style.display = 'block';
+            document.getElementById('extractedText').value = '';
+            document.getElementById('useTextButton').disabled = true;
+            
+            Tesseract.recognize(
+                imgPreview.src,
+                'eng',
+                { 
+                    logger: progress => {
+                        if (progress.status === 'recognizing text') {
+                            const progressBar = document.getElementById('ocrProgress');
+                            const percent = Math.round(progress.progress * 100);
+                            progressBar.style.width = percent + '%';
+                            progressBar.textContent = percent + '%';
+                        }
+                    }
+                }
+            ).then(({ data: { text } }) => {
+                document.getElementById('extractedText').value = text;
+                document.getElementById('useTextButton').disabled = false;
+                document.getElementById('scanningMessage').style.display = 'none';
+                document.getElementById('ocrProgress').style.width = '0%';
+            }).catch(error => {
+                alert("Error scanning image: " + error.message);
+                document.getElementById('scanningMessage').style.display = 'none';
+            });
+        }
+        
+        // Use extracted text
+        function useExtractedText() {
+            const extractedText = document.getElementById('extractedText').value;
+            if (extractedText) {
+                document.getElementById('ingredients').value = extractedText;
+                switchTab('textInput');
+            } else {
+                alert("No text has been extracted yet.");
+            }
+        }
+        
+        // Test ingredients with API
         async function testIngredients() {
             const ingredientsText = document.getElementById('ingredients').value;
             const resultDiv = document.getElementById('result');
             
+            if (!ingredientsText.trim()) {
+                resultDiv.className = '';
+                resultDiv.innerHTML = '<div style="color: red;">Please enter ingredients text.</div>';
+                return;
+            }
+            
+            resultDiv.className = '';
+            resultDiv.innerHTML = 'Analyzing...';
+            
             try {
-                // Correct API URL
+                // API URL
                 const apiUrl = 'https://gluten-free-scanner-api.onrender.com/analyze';
                 
                 const response = await fetch(apiUrl, {
