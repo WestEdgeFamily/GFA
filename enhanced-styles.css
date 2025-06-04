@@ -1,0 +1,136 @@
+/* Enhanced safety indicators */
+.risk-high {
+  color: #ff4747;
+  font-weight: bold;
+  border-left: 4px solid #ff4747;
+  padding-left: 10px;
+}
+
+.risk-medium {
+  color: #ffa726;
+  font-weight: bold;
+  border-left: 4px solid #ffa726;
+  padding-left: 10px;
+}
+
+.risk-low {
+  color: #ffce26;
+  border-left: 4px solid #ffce26;
+  padding-left: 10px;
+}
+
+/* Education panel */
+.education-panel {
+  background-color: rgba(114, 137, 218, 0.1);
+  border: 1px solid var(--accent-color);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.education-panel h3 {
+  color: var(--accent-color);
+  border-bottom: 1px solid rgba(114, 137, 218, 0.3);
+  padding-bottom: 10px;
+}
+
+.safety-tips {
+  margin: 15px 0;
+}
+
+.safety-tips ul {
+  padding-left: 20px;
+}
+
+.safety-tips li {
+  margin-bottom: 8px;
+}
+
+.disclaimer {
+  font-size: 0.9em;
+  color: var(--warning-color);
+  border-top: 1px solid rgba(250, 166, 26, 0.3);
+  padding-top: 10px;
+  margin-top: 15px;
+}
+
+/* Enhanced result display */
+.result-container {
+  background-color: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  margin: 20px 0;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.result-section {
+  margin-bottom: 20px;
+}
+
+.result-explanation {
+  background-color: var(--bg-tertiary);
+  border-radius: var(--border-radius);
+  padding: 15px;
+  margin: 15px 0;
+}
+
+.safe-ingredients-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.safe-ingredient {
+  background-color: rgba(67, 181, 129, 0.1);
+  border: 1px solid var(--success-color);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.9em;
+}
+
+.unrecognized-ingredients-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.unrecognized-ingredient {
+  background-color: rgba(250, 166, 26, 0.1);
+  border: 1px solid var(--warning-color);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.9em;
+}
+
+.caution-note {
+  color: var(--warning-color);
+  font-size: 0.9em;
+  margin-bottom: 10px;
+}
+
+.cross-contamination-notice {
+  background-color: rgba(250, 166, 26, 0.1);
+  border-left: 4px solid var(--warning-color);
+  padding: 15px;
+  margin: 20px 0;
+  border-radius: 0 var(--border-radius) var(--border-radius) 0;
+}
+
+.next-steps ul {
+  padding-left: 20px;
+}
+
+.next-steps li {
+  margin-bottom: 8px;
+}
+
+/* OCR confidence warning */
+#ocrConfidence {
+  background-color: rgba(250, 166, 26, 0.1);
+  border: 1px solid var(--warning-color);
+  color: var(--warning-color);
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: var(--border-radius);
+  display: none;
+}
