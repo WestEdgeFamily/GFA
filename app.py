@@ -37,6 +37,10 @@ AMBIGUOUS_INGREDIENTS = [
     {"name": "vegetable protein", "reason": "Source may include wheat", "confidence": 0.5},
 ]
 
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({"message": "Gluten Free Scanner API is running. Use /analyze endpoint for ingredient analysis."})
+
 @app.route('/analyze', methods=['POST'])
 def analyze_ingredients():
     data = request.json
