@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify
 import re
 import os
+from flask_cors import CORS  # Add this import
 
 app = Flask(__name__)
+CORS(app)  # Add this line to enable CORS
 
 # Sample list of gluten-containing ingredients
 GLUTEN_INGREDIENTS = [
