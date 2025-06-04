@@ -1,497 +1,4 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Gluten-Free Scanner Tester</title>
-    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-    <style>
-        :root {
-            --bg-primary: #121212;
-            --bg-secondary: #1e1e1e;
-            --bg-tertiary: #2d2d2d;
-            --text-primary: #e0e0e0;
-            --text-secondary: #a0a0a0;
-            --accent-color: #7289da; /* Discord-like purple */
-            --success-color: #43b581; /* Green */
-            --warning-color: #faa61a; /* Orange/amber */
-            --danger-color: #f04747;  /* Red */
-            --border-radius: 8px;
-        }
-
-        * {
-            box-sizing: border-box;
-            transition: all 0.2s ease;
-        }
-
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.6;
-        }
-
-        h1, h2, h3 {
-            color: var(--text-primary);
-            font-weight: 500;
-        }
-
-        h1 {
-            font-size: 2.2em;
-            margin-bottom: 20px;
-            text-align: center;
-            background: linear-gradient(90deg, var(--accent-color), #a0b9ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .container {
-            background-color: var(--bg-secondary);
-            padding: 25px;
-            border-radius: var(--border-radius);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-            margin-bottom: 25px;
-        }
-
-        .tabs {
-            display: flex;
-            margin-bottom: 20px;
-            border-bottom: 1px solid var(--bg-tertiary);
-            padding-bottom: 5px;
-        }
-
-        .tab {
-            display: inline-block;
-            padding: 12px 20px;
-            cursor: pointer;
-            margin-right: 10px;
-            border-radius: var(--border-radius) var(--border-radius) 0 0;
-            font-weight: 500;
-            color: var(--text-secondary);
-            position: relative;
-        }
-
-        .tab:hover {
-            color: var(--text-primary);
-            background-color: var(--bg-tertiary);
-        }
-
-        .active-tab {
-            color: var(--accent-color);
-            background-color: transparent;
-        }
-
-        .active-tab::after {
-            content: '';
-            position: absolute;
-            bottom: -6px;
-            left: 0;
-            width: 100%;
-            height: 3px;
-            background: var(--accent-color);
-            border-radius: 3px;
-        }
-
-        .tab-content {
-            display: none;
-            padding: 20px 0;
-        }
-
-        .active-content {
-            display: block;
-            animation: fadeIn 0.3s forwards;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(5px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        textarea {
-            width: 100%;
-            height: 120px;
-            margin: 10px 0;
-            padding: 15px;
-            font-size: 16px;
-            border-radius: var(--border-radius);
-            background-color: var(--bg-tertiary);
-            color: var(--text-primary);
-            border: 1px solid #3d3d3d;
-            resize: vertical;
-        }
-
-        textarea:focus {
-            outline: none;
-            border-color: var(--accent-color);
-            box-shadow: 0 0 0 2px rgba(114, 137, 218, 0.3);
-        }
-
-        button {
-            padding: 12px 24px;
-            color: white;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            margin-right: 10px;
-            border-radius: var(--border-radius);
-            font-weight: 500;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s ease;
-        }
-
-        button i {
-            margin-right: 8px;
-        }
-
-        button.primary {
-            background-color: var(--accent-color);
-        }
-
-        button.primary:hover {
-            background-color: #5d73bc;
-            transform: translateY(-2px);
-        }
-
-        button.secondary {
-            background-color: var(--bg-tertiary);
-        }
-
-        button.secondary:hover {
-            background-color: #3d3d3d;
-            transform: translateY(-2px);
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-
-        input[type="file"] {
-            display: none;
-        }
-
-        .file-upload-label {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 15px;
-            background-color: var(--bg-tertiary);
-            color: var(--text-primary);
-            border-radius: var(--border-radius);
-            cursor: pointer;
-            margin: 15px 0;
-            border: 2px dashed #3d3d3d;
-            transition: all 0.2s;
-        }
-
-        .file-upload-label:hover {
-            background-color: #3d3d3d;
-            border-color: var(--accent-color);
-        }
-
-        .file-upload-label i {
-            font-size: 24px;
-            margin-right: 10px;
-        }
-
-        #result {
-            border: 1px solid #3d3d3d;
-            padding: 20px;
-            margin-top: 20px;
-            border-radius: var(--border-radius);
-            background-color: var(--bg-secondary);
-        }
-
-        .safe {
-            background-color: rgba(67, 181, 129, 0.1);
-            border-color: var(--success-color);
-        }
-
-        .unsafe {
-            background-color: rgba(240, 71, 71, 0.1);
-            border-color: var(--danger-color);
-        }
-
-        .ambiguous {
-            background-color: rgba(250, 166, 26, 0.1);
-            border-color: var(--warning-color);
-        }
-
-        .result-header {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-        }
-
-        .result-header i {
-            margin-right: 10px;
-            font-size: 24px;
-        }
-
-        .safe .result-header i {
-            color: var(--success-color);
-        }
-
-        .unsafe .result-header i {
-            color: var(--danger-color);
-        }
-
-        .ambiguous .result-header i {
-            color: var(--warning-color);
-        }
-
-        .ingredient-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            border-radius: var(--border-radius);
-            overflow: hidden;
-        }
-
-        .ingredient-table th, .ingredient-table td {
-            padding: 12px 15px;
-            text-align: left;
-            border-bottom: 1px solid #3d3d3d;
-        }
-
-        .ingredient-table th {
-            background-color: var(--bg-tertiary);
-            color: var(--text-primary);
-            font-weight: 500;
-        }
-
-        .ingredient-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .high-confidence {
-            color: var(--danger-color);
-            font-weight: 500;
-        }
-
-        .medium-confidence {
-            color: var(--warning-color);
-        }
-
-        .low-confidence {
-            color: var(--accent-color);
-        }
-
-        .section-title {
-            margin: 25px 0 15px 0;
-            font-size: 1.2em;
-            color: var(--text-primary);
-            position: relative;
-            padding-left: 15px;
-        }
-
-        .section-title::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            height: 18px;
-            width: 4px;
-            background-color: var(--accent-color);
-            border-radius: 2px;
-        }
-
-        #imagePreview {
-            max-width: 100%;
-            border-radius: var(--border-radius);
-            margin: 15px 0;
-            display: none;
-        }
-
-        .progress-container {
-            width: 100%;
-            background-color: var(--bg-tertiary);
-            border-radius: var(--border-radius);
-            margin: 15px 0;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 8px;
-            border-radius: var(--border-radius);
-            width: 0%;
-            background: linear-gradient(90deg, var(--accent-color), #a0b9ff);
-        }
-
-        .progress-text {
-            margin-top: 5px;
-            text-align: center;
-            font-size: 14px;
-            color: var(--text-secondary);
-        }
-
-        .loading {
-            display: none;
-            margin: 15px 0;
-        }
-
-        #cameraContainer {
-            display: none;
-            margin: 15px 0;
-        }
-
-        #video {
-            width: 100%;
-            max-height: 400px;
-            border-radius: var(--border-radius);
-            background-color: var(--bg-tertiary);
-        }
-
-        .button-row {
-            display: flex;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            margin: 15px 0;
-        }
-
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin: 10px 0;
-        }
-
-        details {
-            margin-top: 20px;
-            border: 1px solid #3d3d3d;
-            border-radius: var(--border-radius);
-            overflow: hidden;
-        }
-
-        summary {
-            padding: 15px;
-            cursor: pointer;
-            background-color: var(--bg-tertiary);
-            color: var(--text-secondary);
-            font-weight: 500;
-            outline: none;
-        }
-
-        summary:hover {
-            color: var(--text-primary);
-        }
-
-        pre {
-            background-color: var(--bg-primary);
-            padding: 15px;
-            overflow: auto;
-            color: var(--text-secondary);
-            border-radius: 0 0 var(--border-radius) var(--border-radius);
-            margin: 0;
-        }
-
-        @media (max-width: 600px) {
-            .button-row {
-                flex-direction: column;
-            }
-
-            .button-group {
-                width: 100%;
-            }
-
-            button {
-                width: 100%;
-                margin-right: 0;
-                margin-bottom: 10px;
-            }
-
-            .tab {
-                padding: 10px 15px;
-                font-size: 14px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <h1>Gluten-Free Scanner</h1>
-    
-    <div class="container">
-        <div class="tabs">
-            <div class="tab active-tab" onclick="switchTab('textInput')">
-                <i class="fas fa-keyboard"></i> Text Input
-            </div>
-            <div class="tab" onclick="switchTab('photoInput')">
-                <i class="fas fa-camera"></i> Photo Upload
-            </div>
-        </div>
-        
-        <div id="textInput" class="tab-content active-content">
-            <p class="section-title">Enter ingredients text</p>
-            <textarea id="ingredients" placeholder="Enter ingredients list here..."></textarea>
-            <div class="button-row">
-                <button class="primary" onclick="testIngredients()">
-                    <i class="fas fa-search"></i> Analyze Text
-                </button>
-            </div>
-        </div>
-        
-        <div id="photoInput" class="tab-content">
-            <p class="section-title">Upload a photo of ingredients</p>
-            <input type="file" id="imageUpload" accept="image/*">
-            <label for="imageUpload" class="file-upload-label">
-                <i class="fas fa-cloud-upload-alt"></i>
-                <span>Click or drag to upload image</span>
-            </label>
-            
-            <div class="button-group">
-                <button class="secondary" onclick="openCamera()">
-                    <i class="fas fa-camera"></i> Open Camera
-                </button>
-            </div>
-            
-            <div id="cameraContainer">
-                <video id="video" autoplay></video>
-                <div class="button-group">
-                    <button class="primary" onclick="takePhoto()">
-                        <i class="fas fa-camera"></i> Take Photo
-                    </button>
-                    <button class="secondary" onclick="closeCamera()">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
-                </div>
-            </div>
-            
-            <img id="imagePreview" alt="Uploaded image preview">
-            
-            <div class="loading" id="scanningMessage">
-                <p class="section-title">Scanning image</p>
-                <div class="progress-container">
-                    <div class="progress-bar" id="ocrProgress"></div>
-                </div>
-                <div class="progress-text" id="ocrProgressText">0%</div>
-            </div>
-            
-            <p class="section-title">Extracted text</p>
-            <textarea id="extractedText" placeholder="Text will appear here after scanning..." readonly></textarea>
-            
-            <div class="button-group">
-                <button id="scanButton" class="primary" onclick="scanImage()" disabled>
-                    <i class="fas fa-magic"></i> Scan Image
-                </button>
-                <button id="useTextButton" class="secondary" onclick="useExtractedText()" disabled>
-                    <i class="fas fa-check"></i> Use This Text
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <h2>Analysis Results</h2>
-    <div id="result">Results will appear here...</div>
-    
-    <script>
+<script>
         // For camera access
         let stream = null;
         let videoElement = document.getElementById('video');
@@ -564,8 +71,8 @@
             }
         });
         
-        // Scan image using Tesseract.js
-        function scanImage() {
+        // Enhanced OCR implementation
+        async function scanImage() {
             const imgPreview = document.getElementById('imagePreview');
             if (!imgPreview.src) {
                 alert("Please upload an image first.");
@@ -576,9 +83,47 @@
             document.getElementById('scanningMessage').style.display = 'block';
             document.getElementById('extractedText').value = '';
             document.getElementById('useTextButton').disabled = true;
+            document.getElementById('ocrConfidence').style.display = 'none';
             
-            Tesseract.recognize(
-                imgPreview.src,
+            try {
+                // Image preprocessing
+                const enhancedImage = await preprocessImage(imgPreview.src);
+                
+                // First OCR attempt with default settings
+                const result1 = await performOCR(enhancedImage, { rotateAuto: true });
+                
+                // Second OCR attempt with different settings for comparison
+                const result2 = await performOCR(enhancedImage, { 
+                    rotateAuto: true,
+                    tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.():-% '
+                });
+                
+                // Combine and clean results
+                const combinedText = mergeOCRResults(result1, result2);
+                const cleanedText = postprocessText(combinedText);
+                
+                document.getElementById('extractedText').value = cleanedText;
+                document.getElementById('useTextButton').disabled = false;
+                document.getElementById('scanningMessage').style.display = 'none';
+                document.getElementById('ocrProgress').style.width = '0%';
+                
+                // Provide confidence feedback
+                const confidence = Math.min(result1.confidence || 0, result2.confidence || 0);
+                if (confidence < 70) {
+                    document.getElementById('ocrConfidence').textContent = 
+                        "⚠️ Warning: Text recognition confidence is low. Please verify the extracted text carefully.";
+                    document.getElementById('ocrConfidence').style.display = 'block';
+                }
+            } catch (error) {
+                alert("Error scanning image: " + error.message);
+                document.getElementById('scanningMessage').style.display = 'none';
+            }
+        }
+
+        // Temporary wrapper to use Tesseract directly until we implement the advanced OCR
+        async function performOCR(image, options) {
+            const result = await Tesseract.recognize(
+                image, 
                 'eng',
                 { 
                     logger: progress => {
@@ -589,17 +134,89 @@
                             progressBar.style.width = percent + '%';
                             progressText.textContent = percent + '% complete';
                         }
-                    }
+                    },
+                    ...options
                 }
-            ).then(({ data: { text } }) => {
-                document.getElementById('extractedText').value = text;
-                document.getElementById('useTextButton').disabled = false;
-                document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('ocrProgress').style.width = '0%';
-            }).catch(error => {
-                alert("Error scanning image: " + error.message);
-                document.getElementById('scanningMessage').style.display = 'none';
+            );
+            return result.data;
+        }
+
+        // Image preprocessing to improve OCR
+        async function preprocessImage(src) {
+            // Create a canvas and get its context
+            const img = new Image();
+            await new Promise(resolve => {
+                img.onload = resolve;
+                img.src = src;
             });
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            
+            // Draw original image
+            ctx.drawImage(img, 0, 0);
+            
+            // Get image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            // Apply basic contrast enhancement
+            for (let i = 0; i < data.length; i += 4) {
+                // Convert to grayscale
+                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                
+                // Apply threshold for better text contrast
+                const newValue = avg > 128 ? 255 : 0;
+                
+                data[i] = newValue;     // r
+                data[i + 1] = newValue; // g
+                data[i + 2] = newValue; // b
+            }
+            
+            // Put the enhanced image data back on the canvas
+            ctx.putImageData(imageData, 0, 0);
+            
+            return canvas.toDataURL('image/png');
+        }
+
+        // Helper to merge OCR results
+        function mergeOCRResults(result1, result2) {
+            // Use the longer text as the base
+            let baseText = result1.text.length > result2.text.length ? result1.text : result2.text;
+            
+            // Insert any ingredients from the other result that might be missing
+            // This is a simplified approach - a more sophisticated merge would be needed for production
+            const lines1 = result1.text.split('\n');
+            const lines2 = result2.text.split('\n');
+            
+            // Find potential ingredients in second result not in first
+            for (const line of lines2) {
+                if (line.trim() && !lines1.some(l => l.includes(line))) {
+                    baseText += '\n' + line;
+                }
+            }
+            
+            return baseText;
+        }
+
+        // Helper to clean up common OCR errors in ingredient lists
+        function postprocessText(text) {
+            return text
+                // Fix common OCR errors
+                .replace(/c0rn/gi, 'corn')
+                .replace(/\bfiour\b/gi, 'flour')
+                .replace(/\boll\b/gi, 'oil')
+                .replace(/\bsall\b/gi, 'salt')
+                .replace(/\bwater\,/gi, 'water,')
+                .replace(/\bsugar\,/gi, 'sugar,')
+                .replace(/\,\s*\,/g, ',')
+                .replace(/\.\s*\./g, '.')
+                .replace(/lngredients/gi, 'Ingredients')
+                .replace(/\bcontams\b/gi, 'contains')
+                .replace(/\ballergems\b/gi, 'allergens')
+                .trim();
         }
         
         // Use extracted text
@@ -611,6 +228,29 @@
             } else {
                 alert("No text has been extracted yet.");
             }
+        }
+        
+        // Ultra-conservative detection algorithm
+        function analyzeIngredientsForSafety(data) {
+            // Force more cautious interpretation of results
+            if (data.flagged_ingredients && data.flagged_ingredients.length > 0) {
+                // Any confidence > 50% should be treated as unsafe
+                if (data.flagged_ingredients.some(i => i.confidence > 0.5)) {
+                    data.is_gluten_free = false;
+                    data.message = "Potentially unsafe: Contains suspicious ingredients.";
+                } 
+                // Even low confidence should be highlighted as caution
+                else {
+                    data.message = "Exercise caution: Some ingredients need verification.";
+                }
+            }
+            
+            // Add explicit statement about cross-contamination
+            if (data.is_gluten_free) {
+                data.message += " However, always check for cross-contamination risks.";
+            }
+            
+            return data;
         }
         
         // Test ingredients with API
@@ -639,7 +279,10 @@
                     body: JSON.stringify({ ingredients_text: ingredientsText })
                 });
                 
-                const data = await response.json();
+                let data = await response.json();
+                
+                // Apply enhanced safety algorithm
+                data = analyzeIngredientsForSafety(data);
                 
                 // Format the result for better readability
                 let resultHTML = '';
@@ -669,15 +312,15 @@
                         
                         if (ingredient.confidence >= 0.9) {
                             confidenceClass = 'high-confidence';
-                            confidenceText = 'High (' + (ingredient.confidence * 100) + '%)';
+                            confidenceText = 'High (' + Math.round(ingredient.confidence * 100) + '%)';
                             confidenceIcon = '<i class="fas fa-exclamation-circle"></i> ';
                         } else if (ingredient.confidence >= 0.7) {
                             confidenceClass = 'medium-confidence';
-                            confidenceText = 'Medium (' + (ingredient.confidence * 100) + '%)';
+                            confidenceText = 'Medium (' + Math.round(ingredient.confidence * 100) + '%)';
                             confidenceIcon = '<i class="fas fa-exclamation"></i> ';
                         } else {
                             confidenceClass = 'low-confidence';
-                            confidenceText = 'Low (' + (ingredient.confidence * 100) + '%)';
+                            confidenceText = 'Low (' + Math.round(ingredient.confidence * 100) + '%)';
                             confidenceIcon = '<i class="fas fa-question"></i> ';
                         }
                         
@@ -690,6 +333,45 @@
                     
                     resultHTML += '</table>';
                 }
+                
+                // Add education panel
+                resultHTML += `
+                <div class="education-panel">
+                    <h3>Understanding Ingredient Results</h3>
+                    <div class="safety-tips">
+                        <h4>Tips for Celiac Safety:</h4>
+                        <ul>
+                            <li><strong>Wheat derivatives</strong> - Look for ingredients like modified food starch, maltodextrin, and caramel color, which may contain gluten depending on their source.</li>
+                            <li><strong>Hidden sources</strong> - Be aware that "natural flavors" and "spices" can sometimes contain gluten-derived ingredients.</li>
+                            <li><strong>Cross-contamination</strong> - Products manufactured on shared equipment may have cross-contamination risks not reflected in the ingredient list.</li>
+                            <li><strong>Processing aids</strong> - Some ingredients used in processing may not be listed but could contain gluten.</li>
+                            <li><strong>Regional differences</strong> - Ingredients like "glucose syrup" may be gluten-derived in some countries but corn-derived in others.</li>
+                        </ul>
+                    </div>
+                    <p class="disclaimer"><strong>Important:</strong> This tool provides guidance but cannot replace medical advice. Always consult your healthcare provider with concerns.</p>
+                </div>`;
+                
+                // Add cross-contamination notice
+                resultHTML += `
+                <div class="cross-contamination-notice">
+                    <h3 class="section-title">Cross-Contamination Risk</h3>
+                    <p>Even if ingredients appear safe, manufacturing processes can introduce gluten. Look for "May contain" statements or contact manufacturer for dedicated gluten-free facilities.</p>
+                </div>`;
+                
+                // Add recommended next steps
+                resultHTML += `
+                <div class="next-steps">
+                    <h3 class="section-title">Recommended Next Steps</h3>
+                    <ul>
+                        ${data.is_gluten_free ? 
+                            '<li>Look for "May contain wheat" or "Processed in a facility" warnings on packaging</li>' +
+                            '<li>For sensitive individuals, consider products certified gluten-free by a third party</li>' : 
+                            '<li>Look for alternative products specifically labeled as certified gluten-free</li>' +
+                            '<li>Contact the manufacturer to confirm exact ingredient sources if needed</li>'
+                        }
+                        <li>When in doubt about an ingredient, err on the side of caution</li>
+                    </ul>
+                </div>`;
                 
                 // Add raw JSON for reference (collapsible)
                 resultHTML += '<details>';
@@ -704,5 +386,3 @@
             }
         }
     </script>
-</body>
-</html>
