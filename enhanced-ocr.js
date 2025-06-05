@@ -2,6 +2,7 @@
  * Enhanced OCR Module for Gluten-Free Scanner
  * Provides advanced text recognition optimized for ingredient lists
  * Updated: 2025-06-05
+ * Includes iOS compatibility fixes and memory optimizations
  */
 
 // Perform OCR with settings optimized for ingredient lists
@@ -25,16 +26,32 @@ async function performOCR(image, options) {
         if (progress.status === 'recognizing text') {
             const progressBar = document.getElementById('ocrProgress');
             const progressText = document.getElementById('ocrProgressText');
-            const percent = Math.round(progress.progress * 100);
-            const overallPercent = 50 + Math.round(progress.progress * 30); // Scale to 50-80% of overall process
-            progressBar.style.width = overallPercent + '%';
-            progressText.textContent = `Extracting text: ${percent}% complete`;
+            if (progressBar && progressText) {
+                const percent = Math.round(progress.progress * 100);
+                const overallPercent = 50 + Math.round(progress.progress * 30); // Scale to 50-80% of overall process
+                progressBar.style.width = overallPercent + '%';
+                progressText.textContent = `Extracting text: ${percent}% complete`;
+            }
+            
+            // Add to debug log
+            if (typeof logDebug === 'function') {
+                if (progress.progress === 0 || progress.progress === 1 || progress.progress % 0.2 < 0.01) {
+                    logDebug(`OCR progress: ${Math.round(progress.progress * 100)}%`);
+                }
+            }
         }
     };
     
     // Run recognition
-    const result = await Tesseract.recognize(image, finalOptions);
-    return result.data;
+    try {
+        const result = await Tesseract.recognize(image, finalOptions);
+        return result.data;
+    } catch (error) {
+        if (typeof logDebug === 'function') {
+            logDebug(`Error in performOCR: ${error.message}`);
+        }
+        throw error;
+    }
 }
 
 // Enhanced image preprocessing for better OCR results
@@ -61,15 +78,32 @@ async function preprocessImage(src) {
                 });
                 
                 const canvas = document.createElement('canvas');
-                canvas.width = source.naturalWidth || source.width;
-                canvas.height = source.naturalHeight || source.height;
+                
+                // Memory optimization: Limit canvas size for large images
+                const MAX_SIZE = 1500;
+                let width = source.naturalWidth || source.width;
+                let height = source.naturalHeight || source.height;
+                let scale = 1;
+                
+                if (width > MAX_SIZE || height > MAX_SIZE) {
+                    scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+                    width *= scale;
+                    height *= scale;
+                    
+                    if (typeof logDebug === 'function') {
+                        logDebug(`Scaled image from ${source.naturalWidth}x${source.naturalHeight} to ${width}x${height}`);
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(source, 0, 0);
+                ctx.drawImage(source, 0, 0, width, height);
                 
                 return {
-                    imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
-                    width: canvas.width,
-                    height: canvas.height,
+                    imageData: ctx.getImageData(0, 0, width, height),
+                    width: width,
+                    height: height,
                     canvas: canvas
                 };
             }
@@ -79,118 +113,167 @@ async function preprocessImage(src) {
             const img = new Image();
             await new Promise(resolve => {
                 img.onload = resolve;
+                img.onerror = () => {
+                    if (typeof logDebug === 'function') {
+                        logDebug('Error loading image');
+                    }
+                    resolve();
+                };
                 img.src = source;
             });
             
             const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
+            
+            // Memory optimization: Limit canvas size for large images
+            const MAX_SIZE = 1500;
+            let width = img.width;
+            let height = img.height;
+            let scale = 1;
+            
+            if (width > MAX_SIZE || height > MAX_SIZE) {
+                scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+                width *= scale;
+                height *= scale;
+                
+                if (typeof logDebug === 'function') {
+                    logDebug(`Scaled image from ${img.width}x${img.height} to ${width}x${height}`);
+                }
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, 0, 0, width, height);
             
             return {
-                imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
-                width: canvas.width,
-                height: canvas.height,
+                imageData: ctx.getImageData(0, 0, width, height),
+                width: width,
+                height: height,
                 canvas: canvas
             };
         }
     };
     
-    // Get image data
-    const { imageData, width, height, canvas } = await getImageData(src);
-    const ctx = canvas.getContext('2d');
-    const data = imageData.data;
-    
-    // Process the image using multiple techniques and return the best one
-    
-    // 1. Create a clone of the original image data
-    const origData = new Uint8ClampedArray(data);
-    
-    // Check if image is small (likely a cropped ingredient section)
-    const isSmallCrop = width < 500 || height < 200;
-    
-    // 2. Process with adaptive thresholding (better for varied lighting)
-    const blockSize = Math.max(5, Math.floor(Math.min(width, height) / 20));
-    
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            // Calculate local region for adaptive threshold
-            const startX = Math.max(0, x - blockSize);
-            const startY = Math.max(0, y - blockSize);
-            const endX = Math.min(width, x + blockSize);
-            const endY = Math.min(height, y + blockSize);
+    try {
+        // Get image data
+        const { imageData, width, height, canvas } = await getImageData(src);
+        const ctx = canvas.getContext('2d');
+        const data = imageData.data;
+        
+        // Check if image is small (likely a cropped ingredient section)
+        const isSmallCrop = width < 500 || height < 200;
+        
+        // Create a clone of the original data for safe processing
+        const origData = new Uint8ClampedArray(data);
+        
+        // Process with adaptive thresholding (better for varied lighting)
+        const blockSize = Math.max(5, Math.floor(Math.min(width, height) / 20));
+        
+        // iOS optimization: Process smaller chunks to avoid timeouts on iOS
+        const CHUNK_SIZE = 50; // Number of rows to process at once
+        
+        // Process in chunks
+        for (let chunkStart = 0; chunkStart < height; chunkStart += CHUNK_SIZE) {
+            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, height);
             
-            // Calculate local mean
-            let sum = 0, count = 0;
-            for (let ly = startY; ly < endY; ly++) {
-                for (let lx = startX; lx < endX; lx++) {
-                    const idx = (ly * width + lx) * 4;
-                    const avg = (data[idx] + data[idx+1] + data[idx+2]) / 3;
-                    sum += avg;
-                    count++;
+            for (let y = chunkStart; y < chunkEnd; y++) {
+                for (let x = 0; x < width; x++) {
+                    // Calculate local region for adaptive threshold
+                    const startX = Math.max(0, x - blockSize);
+                    const startY = Math.max(0, y - blockSize);
+                    const endX = Math.min(width, x + blockSize);
+                    const endY = Math.min(height, y + blockSize);
+                    
+                    // Calculate local mean
+                    let sum = 0, count = 0;
+                    for (let ly = startY; ly < endY; ly++) {
+                        for (let lx = startX; lx < endX; lx++) {
+                            const idx = (ly * width + lx) * 4;
+                            const avg = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+                            sum += avg;
+                            count++;
+                        }
+                    }
+                    const mean = sum / count;
+                    
+                    // Apply threshold with slight bias (C value)
+                    const idx = (y * width + x) * 4;
+                    const pixelAvg = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+                    const C = isSmallCrop ? 10 : 5; // Higher bias for small crops
+                    const newValue = pixelAvg < (mean - C) ? 0 : 255;
+                    
+                    data[idx] = data[idx+1] = data[idx+2] = newValue;
                 }
             }
-            const mean = sum / count;
             
-            // Apply threshold with slight bias (C value)
-            const idx = (y * width + x) * 4;
-            const pixelAvg = (data[idx] + data[idx+1] + data[idx+2]) / 3;
-            const C = isSmallCrop ? 10 : 5; // Higher bias for small crops
-            const newValue = pixelAvg < (mean - C) ? 0 : 255;
-            
-            data[idx] = data[idx+1] = data[idx+2] = newValue;
+            // Yield to browser to prevent UI freezing
+            await new Promise(resolve => setTimeout(resolve, 0));
         }
-    }
-    
-    // Create a new canvas with the adaptive image
-    const adaptiveCanvas = document.createElement('canvas');
-    adaptiveCanvas.width = width;
-    adaptiveCanvas.height = height;
-    const adaptiveCtx = adaptiveCanvas.getContext('2d');
-    const adaptiveImageData = new ImageData(data, width, height);
-    adaptiveCtx.putImageData(adaptiveImageData, 0, 0);
-    
-    // 3. Process with contrast enhancement & fixed threshold
-    const contrastCanvas = document.createElement('canvas');
-    contrastCanvas.width = width;
-    contrastCanvas.height = height;
-    const contrastCtx = contrastCanvas.getContext('2d');
-    
-    // Draw original image
-    contrastCtx.putImageData(new ImageData(origData, width, height), 0, 0);
-    
-    // Apply contrast adjustment
-    contrastCtx.globalCompositeOperation = 'source-over';
-    contrastCtx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-    contrastCtx.fillRect(0, 0, width, height);
-    
-    // Sharpen the image using convolution
-    const sharpenKernel = [
-        0, -1, 0,
-        -1, 5, -1,
-        0, -1, 0
-    ];
-    
-    const imageDataCopy = contrastCtx.getImageData(0, 0, width, height);
-    const dataCopy = imageDataCopy.data;
-    
-    // Apply fixed thresholding
-    for (let i = 0; i < dataCopy.length; i += 4) {
-        const avg = (dataCopy[i] + dataCopy[i + 1] + dataCopy[i + 2]) / 3;
-        const threshold = isSmallCrop ? 140 : 150; // Lower threshold for ingredient sections
-        const newValue = avg > threshold ? 255 : 0;
         
-        dataCopy[i] = dataCopy[i + 1] = dataCopy[i + 2] = newValue;
+        // Create a new canvas with the adaptive image
+        const adaptiveCanvas = document.createElement('canvas');
+        adaptiveCanvas.width = width;
+        adaptiveCanvas.height = height;
+        const adaptiveCtx = adaptiveCanvas.getContext('2d');
+        const adaptiveImageData = new ImageData(data, width, height);
+        adaptiveCtx.putImageData(adaptiveImageData, 0, 0);
+        
+        // Create contrast enhancement canvas
+        const contrastCanvas = document.createElement('canvas');
+        contrastCanvas.width = width;
+        contrastCanvas.height = height;
+        const contrastCtx = contrastCanvas.getContext('2d');
+        
+        // Draw original image
+        contrastCtx.putImageData(new ImageData(origData, width, height), 0, 0);
+        
+        // Apply contrast adjustment
+        contrastCtx.globalCompositeOperation = 'source-over';
+        contrastCtx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        contrastCtx.fillRect(0, 0, width, height);
+        
+        // Get contrast-enhanced image data
+        const imageDataCopy = contrastCtx.getImageData(0, 0, width, height);
+        const dataCopy = imageDataCopy.data;
+        
+        // Apply fixed thresholding in chunks
+        for (let chunkStart = 0; chunkStart < height; chunkStart += CHUNK_SIZE) {
+            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, height);
+            
+            for (let y = chunkStart; y < chunkEnd; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * 4;
+                    const avg = (dataCopy[idx] + dataCopy[idx+1] + dataCopy[idx+2]) / 3;
+                    const threshold = isSmallCrop ? 140 : 150; // Lower threshold for ingredient sections
+                    const newValue = avg > threshold ? 255 : 0;
+                    
+                    dataCopy[idx] = dataCopy[idx+1] = dataCopy[idx+2] = newValue;
+                }
+            }
+            
+            // Yield to browser to prevent UI freezing
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        
+        contrastCtx.putImageData(imageDataCopy, 0, 0);
+        
+        // Return processed images as data URLs with JPEG compression for memory efficiency
+        const result = [
+            adaptiveCanvas.toDataURL('image/jpeg', 0.85),
+            contrastCanvas.toDataURL('image/jpeg', 0.85)
+        ];
+        
+        // Clean up memory
+        adaptiveCtx.clearRect(0, 0, width, height);
+        contrastCtx.clearRect(0, 0, width, height);
+        
+        return result;
+    } catch (error) {
+        if (typeof logDebug === 'function') {
+            logDebug(`Error in preprocessImage: ${error.message}`);
+        }
+        throw error;
     }
-    
-    contrastCtx.putImageData(imageDataCopy, 0, 0);
-    
-    // Return an array of processed images for OCR to try
-    return [
-        adaptiveCanvas.toDataURL('image/png'),
-        contrastCanvas.toDataURL('image/png')
-    ];
 }
 
 // Combine OCR results from multiple attempts
@@ -200,7 +283,7 @@ function combineOcrResults(results) {
     let maxLength = 0;
     
     for (const result of results) {
-        if (result.text.length > maxLength) {
+        if (result.text && result.text.length > maxLength) {
             baseText = result.text;
             maxLength = result.text.length;
         }
@@ -209,6 +292,8 @@ function combineOcrResults(results) {
     // Extract words from all results
     const allWords = new Set();
     for (const result of results) {
+        if (!result.text) continue;
+        
         const words = result.text
             .split(/\s+/)
             .map(word => word.trim().toLowerCase())
@@ -237,18 +322,39 @@ async function correctImageOrientation(imageElement) {
         // Get image dimensions
         const width = imageElement.naturalWidth || imageElement.width;
         const height = imageElement.naturalHeight || imageElement.height;
-        canvas.width = width;
-        canvas.height = height;
         
-        // Draw the image
-        ctx.drawImage(imageElement, 0, 0);
+        // Memory optimization: Limit canvas size for large images
+        const MAX_SIZE = 1500;
+        let scale = 1;
+        let scaledWidth = width;
+        let scaledHeight = height;
+        
+        if (width > MAX_SIZE || height > MAX_SIZE) {
+            scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+            scaledWidth = Math.floor(width * scale);
+            scaledHeight = Math.floor(height * scale);
+            
+            if (typeof logDebug === 'function') {
+                logDebug(`Scaling for orientation detection: ${width}x${height} to ${scaledWidth}x${scaledHeight}`);
+            }
+        }
+        
+        canvas.width = scaledWidth;
+        canvas.height = scaledHeight;
+        ctx.drawImage(imageElement, 0, 0, scaledWidth, scaledHeight);
         
         // Try to detect orientation using Tesseract
+        if (typeof logDebug === 'function') {
+            logDebug('Starting orientation detection');
+        }
+        
         const result = await Tesseract.detect(canvas);
         
         // If orientation is not upright, rotate the image
         if (result.orientation && result.orientation.angle !== 0) {
-            console.log("Detected orientation angle:", result.orientation.angle);
+            if (typeof logDebug === 'function') {
+                logDebug(`Detected orientation angle: ${result.orientation.angle}`);
+            }
             
             // Create new canvas with dimensions flipped if needed
             const rotatedCanvas = document.createElement('canvas');
@@ -256,33 +362,41 @@ async function correctImageOrientation(imageElement) {
             
             // Check if we need to swap dimensions
             if (Math.abs(result.orientation.angle) === 90 || Math.abs(result.orientation.angle) === 270) {
-                rotatedCanvas.width = height;
-                rotatedCanvas.height = width;
+                rotatedCanvas.width = scaledHeight;
+                rotatedCanvas.height = scaledWidth;
             } else {
-                rotatedCanvas.width = width;
-                rotatedCanvas.height = height;
+                rotatedCanvas.width = scaledWidth;
+                rotatedCanvas.height = scaledHeight;
             }
             
             // Apply rotation
             rotatedCtx.save();
             rotatedCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
             rotatedCtx.rotate((result.orientation.angle * Math.PI) / 180);
-            rotatedCtx.drawImage(imageElement, -width / 2, -height / 2);
+            rotatedCtx.drawImage(canvas, -scaledWidth / 2, -scaledHeight / 2);
             rotatedCtx.restore();
             
-            return rotatedCanvas.toDataURL('image/png');
+            // Clean up memory
+            ctx.clearRect(0, 0, scaledWidth, scaledHeight);
+            
+            return rotatedCanvas.toDataURL('image/jpeg', 0.85);
         }
         
         // If no rotation needed, return original
+        ctx.clearRect(0, 0, scaledWidth, scaledHeight);
         return imageElement;
     } catch (error) {
-        console.error("Error correcting orientation:", error);
+        if (typeof logDebug === 'function') {
+            logDebug(`Error correcting orientation: ${error.message}`);
+        }
         return imageElement; // Return original image if correction fails
     }
 }
 
 // Clean and enhance recognized text
 function postprocessText(text) {
+    if (!text) return "";
+    
     // Base processing from before
     let processed = text
         .replace(/c0rn/gi, 'corn')
@@ -308,7 +422,7 @@ function postprocessText(text) {
         .replace(/preservatlve/gi, 'preservative')
         .trim();
     
-    // NEW: Remove nutritional information sections
+    // Remove nutritional information sections
     const nutritionRegexes = [
         /nutrition\s*facts?.*?(?=ingredients|\n\n|$)/is,
         /nutritional\s*information.*?(?=ingredients|\n\n|$)/is,
@@ -371,6 +485,7 @@ function enhanceIngredientText(text) {
         'NIIILK': 'MILK',
         'NIILK': 'MILK',
         'lecithin)': 'lecithin),',
+        'TRACES': 'TRACES',
         'WHEATS': 'WHEAT',
         'NUTS!': 'NUTS',
         'NUTS1': 'NUTS',
@@ -417,32 +532,62 @@ function enhanceIngredientText(text) {
 // Enhanced OCR with multiple processing techniques
 async function enhanceAndRecognizeText(imageElement) {
     try {
+        if (typeof logDebug === 'function') {
+            logDebug('Starting enhanced OCR process');
+        }
+        
         // Correct orientation if needed
         const orientedImage = await correctImageOrientation(imageElement);
         
         // Image preprocessing with multiple techniques
+        if (typeof logDebug === 'function') {
+            logDebug('Starting image preprocessing');
+        }
         const processedImages = await preprocessImage(orientedImage);
+        if (typeof logDebug === 'function') {
+            logDebug('Image preprocessing completed');
+        }
         
         // Run OCR on all processed images with different settings
         const results = [];
         
         // First pass: Adaptive processed image with default settings
-        results.push(await performOCR(processedImages[0], { 
-            rotateAuto: true 
-        }));
+        if (typeof logDebug === 'function') {
+            logDebug('Starting first OCR pass');
+        }
+        try {
+            const result1 = await performOCR(processedImages[0], { 
+                rotateAuto: true 
+            });
+            results.push(result1);
+            if (typeof logDebug === 'function') {
+                logDebug(`First OCR pass completed with confidence: ${result1.confidence}`);
+            }
+        } catch (e) {
+            if (typeof logDebug === 'function') {
+                logDebug(`Error in first OCR pass: ${e.message}`);
+            }
+        }
         
         // Second pass: Contrast enhanced image with ingredient-specific character whitelist
-        results.push(await performOCR(processedImages[1], { 
-            rotateAuto: true,
-            tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.():-%;/*& ',
-            tessjs_create_box: '1'  // Create word boxes for better word recognition
-        }));
-        
-        // Third pass: Use PSM mode 4 (single column of text)
-        results.push(await performOCR(processedImages[0], {
-            tessedit_pageseg_mode: '4',
-            tessjs_create_box: '1'
-        }));
+        if (typeof logDebug === 'function') {
+            logDebug('Starting second OCR pass');
+        }
+        try {
+            const result2 = await performOCR(processedImages[1], { 
+                rotateAuto: true,
+                tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.():-%;/*& ',
+                tessjs_create_box: '1'  // Create word boxes for better word recognition
+            });
+            results.push(result2);
+            if (typeof logDebug === 'function') {
+                logDebug(`Second OCR pass completed with confidence: ${result2.confidence}`);
+            }
+        } catch (e) {
+            if (typeof logDebug === 'function') {
+                logDebug(`Error in second OCR pass: ${e.message}`);
+            }
+        }
         
         // Combine results using voting/confidence
         let bestText = '';
@@ -450,16 +595,28 @@ async function enhanceAndRecognizeText(imageElement) {
         
         // First pick the result with highest confidence
         for (const result of results) {
-            if (result.confidence > bestConfidence) {
+            if (result && result.confidence > bestConfidence) {
                 bestConfidence = result.confidence;
                 bestText = result.text;
             }
         }
         
+        if (typeof logDebug === 'function') {
+            logDebug(`Best OCR confidence: ${bestConfidence}`);
+        }
+        
         // Enhance the result with text from other results
-        const combinedText = combineOcrResults(results);
+        let combinedText = bestText;
+        if (results.length > 1) {
+            combinedText = combineOcrResults(results);
+        }
+        
         const cleanedText = postprocessText(combinedText);
         const enhancedText = enhanceIngredientText(cleanedText);
+        
+        if (typeof logDebug === 'function') {
+            logDebug('Text enhancement completed');
+        }
         
         return {
             text: enhancedText,
@@ -467,14 +624,19 @@ async function enhanceAndRecognizeText(imageElement) {
         };
         
     } catch (error) {
-        console.error("Error in enhanced OCR:", error);
+        if (typeof logDebug === 'function') {
+            logDebug(`Error in enhanced OCR: ${error.message}`);
+        }
         throw error;
     }
 }
 
 // Specialized function for food label OCR
 async function performFoodLabelOCR(imageElement) {
-    console.log("Starting specialized food label OCR");
+    if (typeof logDebug === 'function') {
+        logDebug("Starting specialized food label OCR");
+    }
+    
     try {
         // Step 1: Try to correct orientation if needed
         const orientedImage = await correctImageOrientation(imageElement);
@@ -486,28 +648,76 @@ async function performFoodLabelOCR(imageElement) {
         const results = [];
         
         // First pass - Standard settings with high-quality image
-        results.push(await Tesseract.recognize(processedImages[0], {
-            lang: 'eng',
-            langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
-            tessedit_pageseg_mode: '6',  // Assume a single uniform block of text
-        }));
+        try {
+            if (typeof logDebug === 'function') {
+                logDebug("Starting food label OCR pass 1");
+            }
+            
+            const result1 = await Tesseract.recognize(processedImages[0], {
+                lang: 'eng',
+                langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
+                tessedit_pageseg_mode: '6',  // Assume a single uniform block of text
+            });
+            
+            results.push(result1);
+            
+            if (typeof logDebug === 'function') {
+                logDebug(`Food label OCR pass 1 completed with confidence: ${result1.data.confidence}`);
+            }
+        } catch (e) {
+            if (typeof logDebug === 'function') {
+                logDebug(`Error in food label OCR pass 1: ${e.message}`);
+            }
+        }
         
         // Second pass - Optimized for lines of text
-        results.push(await Tesseract.recognize(processedImages[1], {
-            lang: 'eng',
-            langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
-            tessedit_pageseg_mode: '7', // Treat the image as a single line of text
-            tessjs_create_box: '1',
-            preserve_interword_spaces: '1'
-        }));
+        try {
+            if (typeof logDebug === 'function') {
+                logDebug("Starting food label OCR pass 2");
+            }
+            
+            const result2 = await Tesseract.recognize(processedImages[1], {
+                lang: 'eng',
+                langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
+                tessedit_pageseg_mode: '7', // Treat the image as a single line of text
+                tessjs_create_box: '1',
+                preserve_interword_spaces: '1'
+            });
+            
+            results.push(result2);
+            
+            if (typeof logDebug === 'function') {
+                logDebug(`Food label OCR pass 2 completed with confidence: ${result2.data.confidence}`);
+            }
+        } catch (e) {
+            if (typeof logDebug === 'function') {
+                logDebug(`Error in food label OCR pass 2: ${e.message}`);
+            }
+        }
         
         // Third pass - Try with different preprocessing
-        results.push(await Tesseract.recognize(processedImages[2], {
-            lang: 'eng',
-            langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
-            tessedit_pageseg_mode: '11',  // Sparse text. Find as much text as possible in no particular order
-            tessjs_create_box: '1',
-        }));
+        try {
+            if (typeof logDebug === 'function') {
+                logDebug("Starting food label OCR pass 3");
+            }
+            
+            const result3 = await Tesseract.recognize(processedImages[2], {
+                lang: 'eng',
+                langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
+                tessedit_pageseg_mode: '11',  // Sparse text. Find as much text as possible in no particular order
+                tessjs_create_box: '1',
+            });
+            
+            results.push(result3);
+            
+            if (typeof logDebug === 'function') {
+                logDebug(`Food label OCR pass 3 completed with confidence: ${result3.data.confidence}`);
+            }
+        } catch (e) {
+            if (typeof logDebug === 'function') {
+                logDebug(`Error in food label OCR pass 3: ${e.message}`);
+            }
+        }
         
         // Combine and clean results
         const texts = results.map(r => r.data.text);
@@ -515,17 +725,21 @@ async function performFoodLabelOCR(imageElement) {
         
         // Evaluate the results and pick the best one
         for (let i = 0; i < texts.length; i++) {
+            const text = texts[i] || '';
+            
             // Check if it contains the word INGREDIENTS or key ingredients words
-            if (texts[i].match(/ingredients/i) || 
-                (texts[i].match(/flour|bran|starch|gum|sugar|salt|water/gi) && 
-                 texts[i].length > bestText.length)) {
-                bestText = texts[i];
+            if (text.match(/ingredients/i) || 
+                (text.match(/flour|bran|starch|gum|sugar|salt|water/gi) && 
+                 text.length > bestText.length)) {
+                bestText = text;
             }
         }
         
         // If none of the results seem good, combine them
-        if (!bestText) {
+        if (!bestText && results.length > 0) {
             bestText = combineOcrResults(results.map(r => r.data));
+        } else if (!bestText) {
+            bestText = "No text detected";
         }
         
         // Clean up the text
@@ -537,210 +751,279 @@ async function performFoodLabelOCR(imageElement) {
             rawTexts: texts
         };
     } catch (error) {
-        console.error("Error in food label OCR:", error);
+        if (typeof logDebug === 'function') {
+            logDebug(`Error in food label OCR: ${error.message}`);
+        }
         throw error;
     }
 }
 
 // Special preprocessing for food labels
 async function preprocessFoodLabel(src) {
-    // Create image and canvas elements
-    const getImageData = async (source) => {
-        // Handle both Image elements and canvas elements
-        if(source.tagName === 'IMG' || source.tagName === 'CANVAS') {
-            // For canvas element
-            if(source.tagName === 'CANVAS') {
-                const ctx = source.getContext('2d');
-                return {
-                    imageData: ctx.getImageData(0, 0, source.width, source.height),
-                    width: source.width,
-                    height: source.height,
-                    canvas: source
-                };
+    try {
+        if (typeof logDebug === 'function') {
+            logDebug("Starting food label preprocessing");
+        }
+        
+        // Create image and canvas elements
+        const getImageData = async (source) => {
+            // Handle both Image elements and canvas elements
+            if(source.tagName === 'IMG' || source.tagName === 'CANVAS') {
+                // For canvas element
+                if(source.tagName === 'CANVAS') {
+                    const ctx = source.getContext('2d');
+                    return {
+                        imageData: ctx.getImageData(0, 0, source.width, source.height),
+                        width: source.width,
+                        height: source.height,
+                        canvas: source
+                    };
+                } 
+                // For IMG element
+                else {
+                    await new Promise(resolve => {
+                        if(source.complete) resolve();
+                        else source.onload = resolve;
+                    });
+                    
+                    const canvas = document.createElement('canvas');
+                    
+                    // Memory optimization: Limit canvas size for large images
+                    const MAX_SIZE = 1500;
+                    let width = source.naturalWidth || source.width;
+                    let height = source.naturalHeight || source.height;
+                    let scale = 1;
+                    
+                    if (width > MAX_SIZE || height > MAX_SIZE) {
+                        scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+                        width *= scale;
+                        height *= scale;
+                        
+                        if (typeof logDebug === 'function') {
+                            logDebug(`Scaled image from ${source.naturalWidth}x${source.naturalHeight} to ${width}x${height}`);
+                        }
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(source, 0, 0, width, height);
+                    
+                    return {
+                        imageData: ctx.getImageData(0, 0, width, height),
+                        width: width,
+                        height: height,
+                        canvas: canvas
+                    };
+                }
             } 
-            // For IMG element
+            // For URL/data URI string
             else {
+                const img = new Image();
                 await new Promise(resolve => {
-                    if(source.complete) resolve();
-                    else source.onload = resolve;
+                    img.onload = resolve;
+                    img.onerror = () => {
+                        if (typeof logDebug === 'function') {
+                            logDebug('Error loading image');
+                        }
+                        resolve();
+                    };
+                    img.src = source;
                 });
                 
                 const canvas = document.createElement('canvas');
-                canvas.width = source.naturalWidth || source.width;
-                canvas.height = source.naturalHeight || source.height;
+                
+                // Memory optimization: Limit canvas size for large images
+                const MAX_SIZE = 1500;
+                let width = img.width;
+                let height = img.height;
+                let scale = 1;
+                
+                if (width > MAX_SIZE || height > MAX_SIZE) {
+                    scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+                    width *= scale;
+                    height *= scale;
+                    
+                    if (typeof logDebug === 'function') {
+                        logDebug(`Scaled image from ${img.width}x${img.height} to ${width}x${height}`);
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(source, 0, 0);
+                ctx.drawImage(img, 0, 0, width, height);
                 
                 return {
-                    imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
-                    width: canvas.width,
-                    height: canvas.height,
+                    imageData: ctx.getImageData(0, 0, width, height),
+                    width: width,
+                    height: height,
                     canvas: canvas
                 };
             }
-        } 
-        // For URL/data URI string
-        else {
-            const img = new Image();
-            await new Promise(resolve => {
-                img.onload = resolve;
-                img.src = source;
-            });
+        };
+        
+        // Get image data
+        const { imageData, width, height, canvas } = await getImageData(src);
+        const ctx = canvas.getContext('2d');
+        const data = imageData.data;
+        
+        // Create multiple processed versions optimized for food labels
+        
+        // Canvas 1: High contrast black text on white background
+        const canvas1 = document.createElement('canvas');
+        canvas1.width = width;
+        canvas1.height = height;
+        const ctx1 = canvas1.getContext('2d');
+        
+        // Draw original image
+        ctx1.drawImage(canvas, 0, 0);
+        
+        // Apply contrast enhancement
+        ctx1.globalCompositeOperation = 'multiply';
+        ctx1.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx1.fillRect(0, 0, width, height);
+        
+        // Reset composite operation
+        ctx1.globalCompositeOperation = 'source-over';
+        
+        // Get image data from enhanced image
+        const imageData1 = ctx1.getImageData(0, 0, width, height);
+        const data1 = imageData1.data;
+        
+        // iOS optimization: Process in chunks to avoid UI freezes
+        const CHUNK_SIZE = 50;
+        
+        // Apply global threshold in chunks
+        for (let chunkStart = 0; chunkStart < height; chunkStart += CHUNK_SIZE) {
+            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, height);
             
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            
-            return {
-                imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
-                width: canvas.width,
-                height: canvas.height,
-                canvas: canvas
-            };
-        }
-    };
-    
-    // Get image data
-    const { imageData, width, height, canvas } = await getImageData(src);
-    const ctx = canvas.getContext('2d');
-    const data = imageData.data;
-    
-    // Create multiple processed versions optimized for food labels
-    
-    // Canvas 1: High contrast black text on white background
-    const canvas1 = document.createElement('canvas');
-    canvas1.width = width;
-    canvas1.height = height;
-    const ctx1 = canvas1.getContext('2d');
-    
-    // Draw original image
-    ctx1.drawImage(canvas, 0, 0);
-    
-    // Apply contrast enhancement
-    ctx1.globalCompositeOperation = 'multiply';
-    ctx1.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx1.fillRect(0, 0, width, height);
-    
-    // Reset composite operation
-    ctx1.globalCompositeOperation = 'source-over';
-    
-    // Get image data from enhanced image
-    const imageData1 = ctx1.getImageData(0, 0, width, height);
-    const data1 = imageData1.data;
-    
-    // Apply global threshold
-    for (let i = 0; i < data1.length; i += 4) {
-        // Calculate grayscale value
-        const avg = (data1[i] + data1[i+1] + data1[i+2]) / 3;
-        const threshold = 160; // Adjusted for food labels
-        const newVal = avg > threshold ? 255 : 0;
-        data1[i] = data1[i+1] = data1[i+2] = newVal;
-    }
-    
-    ctx1.putImageData(imageData1, 0, 0);
-    
-    // Canvas 2: Adaptive threshold with edge enhancement
-    const canvas2 = document.createElement('canvas');
-    canvas2.width = width;
-    canvas2.height = height;
-    const ctx2 = canvas2.getContext('2d');
-    ctx2.drawImage(canvas, 0, 0);
-    
-    // Enhance edges
-    ctx2.filter = 'contrast(1.5) brightness(1.1)';
-    ctx2.drawImage(canvas2, 0, 0);
-    ctx2.filter = 'none';
-    
-    const imageData2 = ctx2.getImageData(0, 0, width, height);
-    const data2 = imageData2.data;
-    
-    // Apply adaptive threshold
-    const blockSize = Math.max(11, Math.floor(Math.min(width, height) / 15));
-    const C = 7; // Bias value
-    
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            // Calculate local region for adaptive threshold
-            const startX = Math.max(0, x - blockSize);
-            const startY = Math.max(0, y - blockSize);
-            const endX = Math.min(width, x + blockSize);
-            const endY = Math.min(height, y + blockSize);
-            
-            let sum = 0, count = 0;
-            for (let ly = startY; ly < endY; ly++) {
-                for (let lx = startX; lx < endX; lx++) {
-                    const idx = (ly * width + lx) * 4;
-                    const avg = (data2[idx] + data2[idx+1] + data2[idx+2]) / 3;
-                    sum += avg;
-                    count++;
+            for (let y = chunkStart; y < chunkEnd; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * 4;
+                    // Calculate grayscale value
+                    const avg = (data1[idx] + data1[idx+1] + data1[idx+2]) / 3;
+                    const threshold = 160; // Adjusted for food labels
+                    const newVal = avg > threshold ? 255 : 0;
+                    data1[idx] = data1[idx+1] = data1[idx+2] = newVal;
                 }
             }
             
-            const mean = sum / count;
-            const idx = (y * width + x) * 4;
-            const pixelAvg = (data2[idx] + data2[idx+1] + data2[idx+2]) / 3;
-            const newValue = pixelAvg < (mean - C) ? 0 : 255;
-            
-            data2[idx] = data2[idx+1] = data2[idx+2] = newValue;
+            // Yield to browser to prevent UI freezing
+            await new Promise(resolve => setTimeout(resolve, 0));
         }
+        
+        ctx1.putImageData(imageData1, 0, 0);
+        
+        // Canvas 2: Adaptive threshold with edge enhancement
+        const canvas2 = document.createElement('canvas');
+        canvas2.width = width;
+        canvas2.height = height;
+        const ctx2 = canvas2.getContext('2d');
+        ctx2.drawImage(canvas, 0, 0);
+        
+        // Enhance edges
+        ctx2.filter = 'contrast(1.5) brightness(1.1)';
+        ctx2.drawImage(canvas2, 0, 0);
+        ctx2.filter = 'none';
+        
+        const imageData2 = ctx2.getImageData(0, 0, width, height);
+        const data2 = imageData2.data;
+        
+        // Apply adaptive threshold in chunks
+        const blockSize = Math.max(11, Math.floor(Math.min(width, height) / 15));
+        const C = 7; // Bias value
+        
+        for (let chunkStart = 0; chunkStart < height; chunkStart += CHUNK_SIZE) {
+            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, height);
+            
+            for (let y = chunkStart; y < chunkEnd; y++) {
+                for (let x = 0; x < width; x++) {
+                    // Calculate local region for adaptive threshold
+                    const startX = Math.max(0, x - blockSize);
+                    const startY = Math.max(0, y - blockSize);
+                    const endX = Math.min(width, x + blockSize);
+                    const endY = Math.min(height, y + blockSize);
+                    
+                    let sum = 0, count = 0;
+                    for (let ly = startY; ly < endY; ly++) {
+                        for (let lx = startX; lx < endX; lx++) {
+                            const idx = (ly * width + lx) * 4;
+                            const avg = (data2[idx] + data2[idx+1] + data2[idx+2]) / 3;
+                            sum += avg;
+                            count++;
+                        }
+                    }
+                    
+                    const mean = sum / count;
+                    const idx = (y * width + x) * 4;
+                    const pixelAvg = (data2[idx] + data2[idx+1] + data2[idx+2]) / 3;
+                    const newValue = pixelAvg < (mean - C) ? 0 : 255;
+                    
+                    data2[idx] = data2[idx+1] = data2[idx+2] = newValue;
+                }
+            }
+            
+            // Yield to browser to prevent UI freezing
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        
+        ctx2.putImageData(imageData2, 0, 0);
+        
+        // Canvas 3: Simple black & white with lower threshold (good for small text)
+        const canvas3 = document.createElement('canvas');
+        canvas3.width = width;
+        canvas3.height = height;
+        const ctx3 = canvas3.getContext('2d');
+        ctx3.drawImage(canvas, 0, 0);
+        
+        const imageData3 = ctx3.getImageData(0, 0, width, height);
+        const data3 = imageData3.data;
+        
+        // Apply simple threshold in chunks
+        for (let chunkStart = 0; chunkStart < height; chunkStart += CHUNK_SIZE) {
+            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, height);
+            
+            for (let y = chunkStart; y < chunkEnd; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * 4;
+                    // Use a lower threshold to catch more text
+                    const avg = (data3[idx] + data3[idx+1] + data3[idx+2]) / 3;
+                    const threshold = 130;
+                    const newVal = avg > threshold ? 255 : 0;
+                    data3[idx] = data3[idx+1] = data3[idx+2] = newVal;
+                }
+            }
+            
+            // Yield to browser to prevent UI freezing
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        
+        ctx3.putImageData(imageData3, 0, 0);
+        
+        if (typeof logDebug === 'function') {
+            logDebug("Food label preprocessing completed");
+        }
+        
+        // Return processed images as JPEG for memory efficiency on iOS
+        const result = [
+            canvas1.toDataURL('image/jpeg', 0.85),
+            canvas2.toDataURL('image/jpeg', 0.85),
+            canvas3.toDataURL('image/jpeg', 0.85)
+        ];
+        
+        // Clean up canvases for memory efficiency
+        ctx1.clearRect(0, 0, width, height);
+        ctx2.clearRect(0, 0, width, height);
+        ctx3.clearRect(0, 0, width, height);
+        
+        return result;
+    } catch (error) {
+        if (typeof logDebug === 'function') {
+            logDebug(`Error in food label preprocessing: ${error.message}`);
+        }
+        throw error;
     }
-    
-    ctx2.putImageData(imageData2, 0, 0);
-    
-    // Canvas 3: Grayscale with histogram equalization
-    const canvas3 = document.createElement('canvas');
-    canvas3.width = width;
-    canvas3.height = height;
-    const ctx3 = canvas3.getContext('2d');
-    ctx3.drawImage(canvas, 0, 0);
-    
-    const imageData3 = ctx3.getImageData(0, 0, width, height);
-    const data3 = imageData3.data;
-    
-    // Convert to grayscale
-    for (let i = 0; i < data3.length; i += 4) {
-        const gray = 0.3 * data3[i] + 0.59 * data3[i+1] + 0.11 * data3[i+2];
-        data3[i] = data3[i+1] = data3[i+2] = gray;
-    }
-    
-    // Calculate histogram
-    const histogram = new Array(256).fill(0);
-    for (let i = 0; i < data3.length; i += 4) {
-        histogram[data3[i]]++;
-    }
-    
-    // Calculate cumulative distribution function
-    const cdf = new Array(256);
-    cdf[0] = histogram[0];
-    for (let i = 1; i < 256; i++) {
-        cdf[i] = cdf[i-1] + histogram[i];
-    }
-    
-    // Normalize CDF
-    const cdfMin = cdf.find(x => x > 0);
-    for (let i = 0; i < 256; i++) {
-        cdf[i] = Math.round(((cdf[i] - cdfMin) / (data3.length/4 - cdfMin)) * 255);
-    }
-    
-    // Apply equalization
-    for (let i = 0; i < data3.length; i += 4) {
-        data3[i] = data3[i+1] = data3[i+2] = cdf[data3[i]];
-    }
-    
-    // Apply global threshold
-    for (let i = 0; i < data3.length; i += 4) {
-        data3[i] = data3[i+1] = data3[i+2] = data3[i] > 130 ? 255 : 0;
-    }
-    
-    ctx3.putImageData(imageData3, 0, 0);
-    
-    return [
-        canvas1.toDataURL('image/png'),
-        canvas2.toDataURL('image/png'),
-        canvas3.toDataURL('image/png')
-    ];
 }
 
 // Clean and format food label text
@@ -817,15 +1100,41 @@ function cleanFoodLabelText(text) {
 // Specialized function to detect just the ingredients section of a food label
 async function detectIngredientsSection(imageElement) {
     try {
+        if (typeof logDebug === 'function') {
+            logDebug("Starting ingredients section detection");
+        }
+        
+        // First create a scaled-down version of the image for faster processing
+        const MAX_SIZE = 800;
+        let width = imageElement.naturalWidth || imageElement.width;
+        let height = imageElement.naturalHeight || imageElement.height;
+        let scale = 1;
+        
+        if (width > MAX_SIZE || height > MAX_SIZE) {
+            scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+            width = Math.floor(width * scale);
+            height = Math.floor(height * scale);
+        }
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(imageElement, 0, 0, width, height);
+        
+        if (typeof logDebug === 'function') {
+            logDebug("Running quick OCR to find ingredients keyword");
+        }
+        
         // First attempt - use OCR to find likely area containing ingredients text
-        const lowResResult = await Tesseract.recognize(imageElement, {
+        const lowResResult = await Tesseract.recognize(canvas, {
             lang: 'eng',
             logger: m => {}, // Suppress progress messages
             rectangle: { // Only sample part of the image to speed things up
-                top: Math.floor(imageElement.height * 0.5),
+                top: Math.floor(height * 0.5),
                 left: 0,
-                width: imageElement.width,
-                height: Math.floor(imageElement.height * 0.5)
+                width: width,
+                height: Math.floor(height * 0.5)
             }
         });
         
@@ -834,7 +1143,9 @@ async function detectIngredientsSection(imageElement) {
         const ingredientsIndex = lowResText.indexOf("ingredients");
         
         if (ingredientsIndex >= 0) {
-            console.log("Found ingredients section via OCR");
+            if (typeof logDebug === 'function') {
+                logDebug("Found ingredients section via OCR");
+            }
             
             // Get the word position info from Tesseract
             const words = lowResResult.data.words || [];
@@ -844,51 +1155,50 @@ async function detectIngredientsSection(imageElement) {
             
             if (ingredientsWord) {
                 // Extract a region that starts at the ingredients word and extends down
-                // Scale coordinates since we used a smaller rectangle
-                const yOffset = Math.floor(imageElement.height * 0.5); // Offset from rectangle
+                // Scale coordinates since we used a smaller rectangle and possibly scaled image
+                const yOffset = Math.floor(height * 0.5); // Offset from rectangle
                 
                 const bbox = {
-                    x: Math.max(0, ingredientsWord.bbox.x0 - 10),
-                    y: ingredientsWord.bbox.y0 + yOffset - 5,
-                    width: imageElement.width - ingredientsWord.bbox.x0 + 10,
+                    x: Math.max(0, ingredientsWord.bbox.x0 - 10) / scale,
+                    y: (ingredientsWord.bbox.y0 + yOffset - 5) / scale,
+                    width: Math.min(
+                        (imageElement.naturalWidth || imageElement.width),
+                        (ingredientsWord.bbox.x1 - ingredientsWord.bbox.x0 + 20) / scale
+                    ),
                     height: Math.min(
-                        imageElement.height - ingredientsWord.bbox.y0 - yOffset + 5,
-                        imageElement.height * 0.3 // Limit height to 30% of the image
+                        (imageElement.naturalHeight || imageElement.height) - (ingredientsWord.bbox.y0 + yOffset) / scale,
+                        (imageElement.naturalHeight || imageElement.height) * 0.3 // Limit height to 30% of the image
                     )
                 };
+                
+                if (typeof logDebug === 'function') {
+                    logDebug(`Detected ingredients section: x=${bbox.x}, y=${bbox.y}, w=${bbox.width}, h=${bbox.height}`);
+                }
                 
                 return bbox;
             }
         }
         
         // Fallback to image analysis method
-        console.log("Ingredients word not found, using pattern detection");
-        
-        // Create a canvas with the image
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = imageElement.width;
-        canvas.height = imageElement.height;
-        ctx.drawImage(imageElement, 0, 0);
+        if (typeof logDebug === 'function') {
+            logDebug("Ingredients word not found, using pattern detection");
+        }
         
         // Get image data
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, width, height);
         const data = imageData.data;
-        
-        // Look for patterns that typically contain ingredient lists
-        // (small text blocks in the bottom half of the packaging)
         
         // 1. Analyze text density in different regions
         const rowDensity = [];
         
         // Skip the top 40% of the image (usually brand/nutrition info)
-        const startY = Math.floor(imageElement.height * 0.4);
+        const startY = Math.floor(height * 0.4);
         
         // Analyze horizontal density of pixels (looking for text blocks)
-        for (let y = startY; y < imageElement.height; y++) {
+        for (let y = startY; y < height; y++) {
             let blackCount = 0;
-            for (let x = 0; x < imageElement.width; x++) {
-                const i = (y * imageElement.width + x) * 4;
+            for (let x = 0; x < width; x++) {
+                const i = (y * width + x) * 4;
                 // Check if pixel is dark (text)
                 const avg = (data[i] + data[i+1] + data[i+2]) / 3;
                 if (avg < 100) blackCount++;
@@ -897,7 +1207,15 @@ async function detectIngredientsSection(imageElement) {
         }
         
         // Find the row with maximum density (likely to be in the ingredients section)
-        const maxDensityRow = startY + rowDensity.indexOf(Math.max(...rowDensity));
+        let maxDensity = 0;
+        let maxDensityRow = startY;
+        
+        for (let i = 0; i < rowDensity.length; i++) {
+            if (rowDensity[i] > maxDensity) {
+                maxDensity = rowDensity[i];
+                maxDensityRow = startY + i;
+            }
+        }
         
         // Look for starting and ending rows of the ingredients block
         let startRow = maxDensityRow;
@@ -905,15 +1223,15 @@ async function detectIngredientsSection(imageElement) {
         
         // Search for the start of the text block (where density drops)
         for (let y = maxDensityRow; y > startY; y--) {
-            if (rowDensity[y - startY] < rowDensity[maxDensityRow - startY] * 0.3) {
+            if (rowDensity[y - startY] < maxDensity * 0.3) {
                 startRow = y + 5; // Add margin
                 break;
             }
         }
         
         // Search for the end of the text block
-        for (let y = maxDensityRow; y < imageElement.height; y++) {
-            if (rowDensity[y - startY] < rowDensity[maxDensityRow - startY] * 0.3) {
+        for (let y = maxDensityRow; y < height; y++) {
+            if (rowDensity[y - startY] < maxDensity * 0.3) {
                 endRow = y - 5; // Add margin
                 break;
             }
@@ -922,20 +1240,26 @@ async function detectIngredientsSection(imageElement) {
         // Create bbox for the detected ingredients section
         const bbox = {
             x: 0,
-            y: startRow,
-            width: imageElement.width,
-            height: endRow - startRow
+            y: startRow / scale,
+            width: (imageElement.naturalWidth || imageElement.width),
+            height: (endRow - startRow) / scale
         };
+        
+        if (typeof logDebug === 'function') {
+            logDebug(`Detected ingredients section using density analysis: x=${bbox.x}, y=${bbox.y}, w=${bbox.width}, h=${bbox.height}`);
+        }
         
         return bbox;
     } catch (error) {
-        console.error("Error detecting ingredients section:", error);
+        if (typeof logDebug === 'function') {
+            logDebug(`Error detecting ingredients section: ${error.message}`);
+        }
         // Return a default region in the middle-bottom of the image
         return {
             x: 0,
-            y: Math.floor(imageElement.height * 0.6),
-            width: imageElement.width,
-            height: Math.floor(imageElement.height * 0.3)
+            y: Math.floor((imageElement.naturalHeight || imageElement.height) * 0.6),
+            width: (imageElement.naturalWidth || imageElement.width),
+            height: Math.floor((imageElement.naturalHeight || imageElement.height) * 0.3)
         };
     }
 }
@@ -943,10 +1267,36 @@ async function detectIngredientsSection(imageElement) {
 // Function to detect if an image contains food label
 async function detectIfFoodLabel(imageElement) {
     try {
+        if (typeof logDebug === 'function') {
+            logDebug("Starting food label detection");
+        }
+        
+        // Create a scaled down version for faster processing
+        const MAX_SIZE = 600;
+        let width = imageElement.naturalWidth || imageElement.width;
+        let height = imageElement.naturalHeight || imageElement.height;
+        let scale = 1;
+        
+        if (width > MAX_SIZE || height > MAX_SIZE) {
+            scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+            width = Math.floor(width * scale);
+            height = Math.floor(height * scale);
+            
+            if (typeof logDebug === 'function') {
+                logDebug(`Scaling image for food label detection: ${width}x${height}`);
+            }
+        }
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(imageElement, 0, 0, width, height);
+        
         // Quick OCR sample to check for food-related keywords
-        const result = await Tesseract.recognize(imageElement, {
+        const result = await Tesseract.recognize(canvas, {
             lang: 'eng',
-            rectangle: { left: 0, top: 0, width: 0.8, height: 0.8 }
+            rectangle: { left: 0, top: 0, width: width, height: height }
         });
         
         const text = result.data.text.toLowerCase();
@@ -960,9 +1310,20 @@ async function detectIfFoodLabel(imageElement) {
         ];
         
         // Check if any keywords are found
-        return foodKeywords.some(keyword => text.includes(keyword));
+        const isFood = foodKeywords.some(keyword => text.includes(keyword));
+        
+        if (typeof logDebug === 'function') {
+            logDebug(`Food label detection result: ${isFood ? "Yes" : "No"}`);
+        }
+        
+        // Clean up canvas
+        ctx.clearRect(0, 0, width, height);
+        
+        return isFood;
     } catch (e) {
-        console.error("Error in food label detection:", e);
+        if (typeof logDebug === 'function') {
+            logDebug(`Error in food label detection: ${e.message}`);
+        }
         return false; // Default to standard OCR on error
     }
 }
