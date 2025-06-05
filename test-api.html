@@ -926,13 +926,6 @@
                         <i class="fas fa-redo"></i> Try Again
                     </button>
                 </div>
-                
-                <div class="text-enhancement">
-                    <button class="secondary" onclick="enhanceTextUI()">
-                        <i class="fas fa-magic"></i> Auto-Format Text
-                    </button>
-                    <div id="textEnhancementStatus" style="display: none;"></div>
-                </div>
             </div>
         </div>
         
@@ -1017,26 +1010,6 @@
         // For camera access
         let stream = null;
         let videoElement = document.getElementById('video');
-        let cocoModel = null;
-        
-        // Load COCO-SSD model for object detection
-        async function loadObjectDetectionModel() {
-            try {
-                logDebug("Loading object detection model");
-                cocoModel = await cocoSsd.load();
-                logDebug("Object detection model loaded successfully");
-            } catch(error) {
-                logDebug(`Error loading object detection model: ${error.message}`);
-                console.error("Error loading object detection model:", error);
-            }
-        }
-        
-        // Load model on page load
-        window.addEventListener('DOMContentLoaded', function() {
-            logDebug("Page loaded, initializing app");
-            loadObjectDetectionModel();
-            switchTab('photoInput');
-        });
         
         // Switch between tabs
         function switchTab(tabId) {
@@ -1098,7 +1071,7 @@
             
             // Convert to image and display
             const imgPreview = document.getElementById('imagePreview');
-            imgPreview.src = canvas.toDataURL('image/jpeg', 0.85); // Use JPEG with compression
+            imgPreview.src = canvas.toDataURL('image/jpeg', 0.85);
             imgPreview.style.display = 'block';
             
             // Close camera
@@ -1136,7 +1109,7 @@
             document.getElementById('processingSteps').style.display = 'flex';
             document.getElementById('stepUpload').classList.add('active');
             
-            // Show manual crop option and skip option
+            // Show manual crop option and skip option right away
             document.getElementById('manualCropContainer').style.display = 'flex';
             document.getElementById('skipOcrContainer').style.display = 'flex';
             
@@ -1160,12 +1133,12 @@
             // Wait for image to load fully
             if (imgElement.complete) {
                 logDebug("Image already loaded, proceeding with detection");
-                detectIngredientsArea(imgElement);
+                simpleDetectAndCrop(imgElement);
             } else {
                 logDebug("Waiting for image to load");
                 imgElement.onload = function() {
                     logDebug("Image loaded, proceeding with detection");
-                    detectIngredientsArea(imgElement);
+                    simpleDetectAndCrop(imgElement);
                 };
             }
         }
@@ -1177,116 +1150,35 @@
             switchTab('textInput');
         }
         
-        // Detect ingredients area using object detection and specialized text detection
-        async function detectIngredientsArea(imgElement) {
-            try {
-                // Update progress indicator
-                document.getElementById('stepDetect').classList.add('active');
-                document.getElementById('scanningMessage').style.display = 'block';
-                document.getElementById('ocrProgressText').textContent = 'Detecting ingredients area...';
-                document.getElementById('ocrProgress').style.width = '20%';
-                
-                logDebug("Starting ingredients area detection");
-                
-                // Set a timeout for the entire detection process - REDUCED FROM 30s to 10s
-                const detectionTimeout = setTimeout(() => {
-                    logDebug("Ingredient detection timed out after 10 seconds");
-                    alert("Detection is taking too long. Please use the manual crop option.");
-                    document.getElementById('ocrProgressText').textContent = 'Please use manual options';
-                }, 10000);  // Changed from 30000 to 10000
-                
-                try {
-                    // For iOS devices, use a simpler approach for better reliability
-                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-                    if (isIOS) {
-                        logDebug("iOS device detected, using simplified detection");
-                        clearTimeout(detectionTimeout);
-                        
-                        // Skip automatic detection and move straight to manual options
-                        document.getElementById('scanningMessage').style.display = 'none';
-                        document.getElementById('manualCropContainer').style.display = 'flex';
-                        document.getElementById('skipOcrContainer').style.display = 'flex';
-                        
-                        // Show notification to user
-                        alert("For best results on iOS, please use the manual selection option.");
-                        return;
-                    }
-                    
-                    // Try direct ingredients section detection
-                    logDebug("Attempting specialized ingredients section detection");
-                    const ingredientsBbox = await window.detectIngredientsSection(imgElement);
-                    clearTimeout(detectionTimeout);
-                    
-                    if (ingredientsBbox) {
-                        logDebug(`Detected ingredients section: x=${ingredientsBbox.x}, y=${ingredientsBbox.y}, w=${ingredientsBbox.width}, h=${ingredientsBbox.height}`);
-                        
-                        // Add visual indicator for detected ingredients area
-                        const container = document.getElementById('imageContainer');
-                        const overlay = document.createElement('div');
-                        overlay.className = 'detection-overlay';
-                        overlay.style.borderColor = '#00BFFF';
-                        
-                        // Calculate position relative to the image
-                        const imgRect = imgElement.getBoundingClientRect();
-                        const scaleX = imgElement.width / imgElement.naturalWidth;
-                        const scaleY = imgElement.height / imgElement.naturalHeight;
-                        
-                        overlay.style.left = `${ingredientsBbox.x * scaleX}px`;
-                        overlay.style.top = `${ingredientsBbox.y * scaleY}px`;
-                        overlay.style.width = `${ingredientsBbox.width * scaleX}px`;
-                        overlay.style.height = `${ingredientsBbox.height * scaleY}px`;
-                        
-                        container.appendChild(overlay);
-                        
-                        // Continue with cropping and OCR
-                        cropAndRecognizeText(imgElement, null, ingredientsBbox);
-                        return;
-                    }
-                } catch (error) {
-                    clearTimeout(detectionTimeout);
-                    logDebug(`Error during specialized ingredients detection: ${error.message}`);
-                }
-                
-                // If we reach here, use a simple default crop area in the middle-bottom of the image
-                logDebug("Using default region in the middle-bottom of the image");
-                
-                const defaultCrop = {
-                    x: 0,
-                    y: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.6),
-                    width: (imgElement.naturalWidth || imgElement.width),
-                    height: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.3)
-                };
-                
-                cropAndRecognizeText(imgElement, null, defaultCrop);
-                
-            } catch (error) {
-                logDebug(`General error during detection: ${error.message}`);
-                alert("There was an issue detecting the ingredients. Please try manual options.");
-                document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('manualCropContainer').style.display = 'flex';
-                document.getElementById('skipOcrContainer').style.display = 'flex';
-            }
+        // Simple detection - just use the bottom half of the image
+        function simpleDetectAndCrop(imgElement) {
+            logDebug("Using simple detection approach");
+            document.getElementById('stepDetect').classList.add('active');
+            
+            // Default to bottom half of the image which often contains ingredients
+            const cropArea = {
+                x: 0,
+                y: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5),
+                width: imgElement.naturalWidth || imgElement.width,
+                height: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5)
+            };
+            
+            // Continue with simplified cropping and OCR
+            cropAndRecognizeText(imgElement, null, cropArea);
         }
         
-        // Crop image and process text with timeout protection
-        async function cropAndRecognizeText(imgElement, bbox = null, ingredientsBbox = null) {
-            logDebug("Starting crop and recognize text function");
-            
-            // Set a timeout to prevent infinite processing
-            const cropTimeout = setTimeout(() => {
-                logDebug("Crop and recognize text timed out after 10 seconds");
-                document.getElementById('scanningMessage').style.display = 'none';
-                alert("Processing is taking too long. Please try manually selecting the ingredients section.");
-            }, 10000);  // Changed from 30000 to 10000
+        // Simplified crop and OCR function
+        function cropAndRecognizeText(imgElement, bbox = null, ingredientsBbox = null) {
+            logDebug("Starting simplified crop and recognize");
             
             try {
-                // Determine cropping area - prioritize ingredients detection
+                // Determine cropping area
                 let cropArea;
                 if (ingredientsBbox) {
-                    logDebug("Using detected ingredients area for cropping");
+                    logDebug("Using detected ingredients area");
                     cropArea = ingredientsBbox;
                 } else if (bbox) {
-                    logDebug("Using object detection bbox for cropping");
+                    logDebug("Using object detection bbox");
                     cropArea = {
                         x: bbox[0],
                         y: bbox[1],
@@ -1294,136 +1186,107 @@
                         height: bbox[3]
                     };
                 } else {
-                    logDebug("Using full image for cropping");
+                    logDebug("Using bottom half of image as default");
+                    // Default to bottom half of the image
                     cropArea = {
                         x: 0,
-                        y: 0,
+                        y: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5),
                         width: imgElement.naturalWidth || imgElement.width,
-                        height: imgElement.naturalHeight || imgElement.height
+                        height: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5)
                     };
                 }
                 
-                // Create canvas for cropped image
+                // Create canvas for cropped image - use smaller size
                 const canvas = document.getElementById('croppingCanvas');
-                
-                // Memory optimization: Limit canvas size for large crops
-                const MAX_DIMENSION = 800;  // Reduced from 1200 to 800 for better iOS performance
+                const MAX_SIZE = 800; 
                 let scaleFactor = 1;
                 
-                if (cropArea.width > MAX_DIMENSION || cropArea.height > MAX_DIMENSION) {
-                    scaleFactor = Math.min(MAX_DIMENSION / cropArea.width, MAX_DIMENSION / cropArea.height);
-                    logDebug(`Scaling crop by factor ${scaleFactor} to prevent memory issues`);
+                if (cropArea.width > MAX_SIZE || cropArea.height > MAX_SIZE) {
+                    scaleFactor = Math.min(MAX_SIZE / cropArea.width, MAX_SIZE / cropArea.height);
+                    logDebug(`Scaling image by factor ${scaleFactor}`);
                 }
                 
                 canvas.width = Math.floor(cropArea.width * scaleFactor);
                 canvas.height = Math.floor(cropArea.height * scaleFactor);
                 const ctx = canvas.getContext('2d');
-                
-                // Clear any previous content
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
-                // Draw only the cropped portion
+                // Draw the cropped portion
                 ctx.drawImage(
                     imgElement,
-                    cropArea.x, cropArea.y, cropArea.width, cropArea.height, // Source coordinates
-                    0, 0, canvas.width, canvas.height // Destination coordinates
+                    cropArea.x, cropArea.y, cropArea.width, cropArea.height,
+                    0, 0, canvas.width, canvas.height
                 );
                 
                 // Display cropped image
                 const croppedPreview = document.getElementById('croppedPreview');
-                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.7); // Lower quality for better performance
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.7);
                 croppedPreview.style.display = 'block';
                 
-                // Clear the timeout since the crop succeeded
-                clearTimeout(cropTimeout);
+                // Run OCR directly on the canvas
+                document.getElementById('stepOcr').classList.add('active');
+                document.getElementById('scanningMessage').style.display = 'block';
+                document.getElementById('ocrProgressText').textContent = 'Reading text...';
+                document.getElementById('ocrProgress').style.width = '50%';
                 
-                // Enhance and recognize the cropped text
-                logDebug("Crop completed, proceeding to OCR");
-                await performEnhancedOCR(canvas);
-            } catch (error) {
-                clearTimeout(cropTimeout);
-                logDebug(`Error cropping image: ${error.message}`);
+                // Set a short timeout
+                const ocrTimeout = setTimeout(() => {
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    document.getElementById('extractedTextContainer').style.display = 'block';
+                    document.getElementById('ocrConfidence').style.display = 'block';
+                    document.getElementById('ocrConfidence').textContent = "⚠️ Text recognition is taking too long. Please try manual text entry.";
+                    logDebug("OCR timed out after 15 seconds");
+                }, 15000);
                 
-                // Fall back to manual options
-                document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('manualCropContainer').style.display = 'flex';
-                document.getElementById('skipOcrContainer').style.display = 'flex';
-                
-                alert("Error processing image. Please try using manual selection or text entry.");
-            }
-        }
-        
-        // Perform OCR with timeout protection
-        async function performEnhancedOCR(imageElement) {
-            // Update progress indicator
-            document.getElementById('stepOcr').classList.add('active');
-            document.getElementById('ocrProgressText').textContent = 'Extracting text...';
-            document.getElementById('ocrProgress').style.width = '50%';
-            
-            logDebug("Starting OCR process");
-            
-            // Set a timeout to prevent infinite processing - REDUCED FROM 60s to 20s
-            const ocrTimeout = setTimeout(() => {
-                logDebug("OCR timed out after 20 seconds");
-                document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('extractedTextContainer').style.display = 'block';
-                document.getElementById('ocrConfidence').style.display = 'block';
-                document.getElementById('ocrConfidence').textContent = 
-                    "⚠️ OCR process timed out. Please enter text manually.";
-            }, 20000);  // Changed from 60000 to 20000
-            
-            try {
-                // Simplify the OCR approach for iOS
-                logDebug("Using simplified OCR approach");
-                
-                // Use a direct OCR approach with minimal preprocessing
-                // Race against a shorter timeout
-                const result = await Promise.race([
-                    window.enhanceAndRecognizeText(imageElement),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error("OCR timed out")), 15000)
-                    )
-                ]);
-                
-                // Clear the main timeout since we completed successfully
-                clearTimeout(ocrTimeout);
-                
-                logDebug(`OCR completed with confidence: ${result.confidence}`);
-                
-                // Display extracted text
-                document.getElementById('extractedText').value = result.text;
-                document.getElementById('extractedTextContainer').style.display = 'block';
-                
-                // Check confidence and show warning if needed
-                if (result.confidence < 70) {
-                    logDebug(`Low confidence OCR result: ${result.confidence}`);
+                try {
+                    // Direct Tesseract call without our enhanced-ocr.js complexity
+                    Tesseract.recognize(canvas, {
+                        lang: 'eng',
+                        langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data'
+                    })
+                    .then(result => {
+                        clearTimeout(ocrTimeout);
+                        
+                        // Display extracted text
+                        document.getElementById('extractedText').value = result.data.text;
+                        document.getElementById('extractedTextContainer').style.display = 'block';
+                        document.getElementById('ingredients').value = result.data.text;
+                        document.getElementById('scanningMessage').style.display = 'none';
+                        
+                        // Show confidence warning if needed
+                        if (result.data.confidence < 70) {
+                            document.getElementById('ocrConfidence').textContent = 
+                                `⚠️ Text recognition may not be accurate. Please verify or edit the text.`;
+                            document.getElementById('ocrConfidence').style.display = 'block';
+                        }
+                        
+                        // Continue with analysis
+                        testIngredients();
+                    })
+                    .catch(error => {
+                        clearTimeout(ocrTimeout);
+                        logDebug(`Error in OCR: ${error.message}`);
+                        
+                        document.getElementById('scanningMessage').style.display = 'none';
+                        document.getElementById('extractedTextContainer').style.display = 'block';
+                        document.getElementById('ocrConfidence').textContent = 
+                            `⚠️ Text recognition failed. Please enter text manually.`;
+                        document.getElementById('ocrConfidence').style.display = 'block';
+                    });
+                } catch (error) {
+                    clearTimeout(ocrTimeout);
+                    logDebug(`Error in OCR: ${error.message}`);
+                    
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    document.getElementById('extractedTextContainer').style.display = 'block';
                     document.getElementById('ocrConfidence').textContent = 
-                        `⚠️ Warning: Text recognition confidence is low (${Math.round(result.confidence)}%). ` +
-                        `You may want to verify or manually edit the extracted text.`;
+                        `⚠️ Text recognition failed. Please enter text manually.`;
                     document.getElementById('ocrConfidence').style.display = 'block';
                 }
-                
-                // Continue with automatic analysis
-                document.getElementById('ingredients').value = result.text;
-                document.getElementById('scanningMessage').style.display = 'none';
-                testIngredients();
-                
             } catch (error) {
-                // Clear the timeout since we got an error
-                clearTimeout(ocrTimeout);
-                
-                logDebug(`Error during OCR: ${error.message}`);
-                console.error("Error during OCR:", error);
-                
-                // Show extracted text area anyway, but empty or with partial results
-                document.getElementById('extractedTextContainer').style.display = 'block';
-                document.getElementById('ocrConfidence').textContent = 
-                    `⚠️ Error: Text extraction failed (${error.message}). Please enter text manually.`;
-                document.getElementById('ocrConfidence').style.display = 'block';
-                
-                // Hide the loading indicator
+                logDebug(`Error in crop and recognize: ${error.message}`);
                 document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('ocrProgress').style.width = '0%';
+                alert("Error processing image. Please try entering text manually.");
             }
         }
 
@@ -1479,11 +1342,10 @@
             // Get image dimensions
             const imgRect = imgPreview.getBoundingClientRect();
             
-            // Default crop area: position it where ingredients are commonly found
-            // iOS-friendly positioning (absolute values)
+            // Default crop area: position it in the middle of the image
             const boxWidth = imgRect.width * 0.8;
-            const boxHeight = imgRect.height * 0.25;
-            const boxTop = imgRect.top + imgRect.height * 0.6;
+            const boxHeight = imgRect.height * 0.4;
+            const boxTop = imgRect.top + imgRect.height * 0.5 - boxHeight/2;
             const boxLeft = imgRect.left + imgRect.width * 0.1;
             
             cropBox.style.position = 'absolute';
@@ -1533,42 +1395,14 @@
             
             imgContainer.appendChild(confirmBtn);
         }
-
-        // Simplified resizable/draggable function for iOS
+        
+        // Simple implementation for handling dragging/resizing
         function makeResizableDraggable(element) {
             let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
             let isResizing = false;
             
-            // Get the handle and parent container
             const handle = element.querySelector('.resize-handle');
             const container = element.parentElement;
-            
-            // Touch events for dragging the box
-            element.addEventListener('touchstart', function(e) {
-                if (e.target === handle) return; // Don't handle if touch is on resize handle
-                e.preventDefault();
-                
-                const touch = e.touches[0];
-                pos3 = touch.clientX;
-                pos4 = touch.clientY;
-                
-                document.addEventListener('touchmove', dragTouch);
-                document.addEventListener('touchend', dragTouchEnd);
-            });
-            
-            // Touch events for resizing
-            handle.addEventListener('touchstart', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                isResizing = true;
-                
-                const touch = e.touches[0];
-                pos3 = touch.clientX;
-                pos4 = touch.clientY;
-                
-                document.addEventListener('touchmove', resizeTouch);
-                document.addEventListener('touchend', resizeTouchEnd);
-            });
             
             // Mouse events for dragging
             element.addEventListener('mousedown', function(e) {
@@ -1595,52 +1429,31 @@
                 document.addEventListener('mouseup', resizeMouseEnd);
             });
             
-            // Touch drag function
-            function dragTouch(e) {
-                e.preventDefault();
+            // Touch events for dragging
+            element.addEventListener('touchstart', function(e) {
+                if (e.target === handle) return;
                 
                 const touch = e.touches[0];
-                pos1 = pos3 - touch.clientX;
-                pos2 = pos4 - touch.clientY;
                 pos3 = touch.clientX;
                 pos4 = touch.clientY;
                 
-                const newTop = element.offsetTop - pos2;
-                const newLeft = element.offsetLeft - pos1;
-                
-                // Ensure we stay within container bounds
-                const containerRect = container.getBoundingClientRect();
-                const elemRect = element.getBoundingClientRect();
-                
-                if (newTop >= 0 && newTop + elemRect.height <= containerRect.height) {
-                    element.style.top = newTop + 'px';
-                }
-                
-                if (newLeft >= 0 && newLeft + elemRect.width <= containerRect.width) {
-                    element.style.left = newLeft + 'px';
-                }
-            }
+                document.addEventListener('touchmove', dragTouch);
+                document.addEventListener('touchend', dragTouchEnd);
+            });
             
-            // Touch resize function
-            function resizeTouch(e) {
-                e.preventDefault();
-                
-                if (!isResizing) return;
+            // Touch events for resizing
+            handle.addEventListener('touchstart', function(e) {
+                e.stopPropagation();
+                isResizing = true;
                 
                 const touch = e.touches[0];
-                const elemRect = element.getBoundingClientRect();
-                const containerRect = container.getBoundingClientRect();
+                pos3 = touch.clientX;
+                pos4 = touch.clientY;
                 
-                // Calculate new width and height
-                const width = Math.max(50, touch.clientX - elemRect.left);
-                const height = Math.max(50, touch.clientY - elemRect.top);
-                
-                // Apply new dimensions
-                element.style.width = width + 'px';
-                element.style.height = height + 'px';
-            }
+                document.addEventListener('touchmove', resizeTouch);
+                document.addEventListener('touchend', resizeTouchEnd);
+            });
             
-            // Mouse drag function
             function dragMouse(e) {
                 e.preventDefault();
                 
@@ -1652,24 +1465,26 @@
                 const newTop = element.offsetTop - pos2;
                 const newLeft = element.offsetLeft - pos1;
                 
-                // Ensure we stay within container bounds
-                const containerRect = container.getBoundingClientRect();
-                const elemRect = element.getBoundingClientRect();
-                
-                if (newTop >= 0 && newTop + elemRect.height <= containerRect.height) {
-                    element.style.top = newTop + 'px';
-                }
-                
-                if (newLeft >= 0 && newLeft + elemRect.width <= containerRect.width) {
-                    element.style.left = newLeft + 'px';
-                }
+                element.style.top = newTop + 'px';
+                element.style.left = newLeft + 'px';
             }
             
-            // Mouse resize function
+            function dragTouch(e) {
+                const touch = e.touches[0];
+                pos1 = pos3 - touch.clientX;
+                pos2 = pos4 - touch.clientY;
+                pos3 = touch.clientX;
+                pos4 = touch.clientY;
+                
+                const newTop = element.offsetTop - pos2;
+                const newLeft = element.offsetLeft - pos1;
+                
+                element.style.top = newTop + 'px';
+                element.style.left = newLeft + 'px';
+            }
+            
             function resizeMouse(e) {
                 e.preventDefault();
-                
-                if (!isResizing) return;
                 
                 const elemRect = element.getBoundingClientRect();
                 
@@ -1677,21 +1492,20 @@
                 const width = Math.max(50, e.clientX - elemRect.left);
                 const height = Math.max(50, e.clientY - elemRect.top);
                 
-                // Apply new dimensions
                 element.style.width = width + 'px';
                 element.style.height = height + 'px';
             }
             
-            // End events
-            function dragTouchEnd() {
-                document.removeEventListener('touchmove', dragTouch);
-                document.removeEventListener('touchend', dragTouchEnd);
-            }
-            
-            function resizeTouchEnd() {
-                isResizing = false;
-                document.removeEventListener('touchmove', resizeTouch);
-                document.removeEventListener('touchend', resizeTouchEnd);
+            function resizeTouch(e) {
+                const touch = e.touches[0];
+                const elemRect = element.getBoundingClientRect();
+                
+                // Calculate new width and height
+                const width = Math.max(50, touch.clientX - elemRect.left);
+                const height = Math.max(50, touch.clientY - elemRect.top);
+                
+                element.style.width = width + 'px';
+                element.style.height = height + 'px';
             }
             
             function dragMouseEnd() {
@@ -1704,9 +1518,20 @@
                 document.removeEventListener('mousemove', resizeMouse);
                 document.removeEventListener('mouseup', resizeMouseEnd);
             }
+            
+            function dragTouchEnd() {
+                document.removeEventListener('touchmove', dragTouch);
+                document.removeEventListener('touchend', dragTouchEnd);
+            }
+            
+            function resizeTouchEnd() {
+                isResizing = false;
+                document.removeEventListener('touchmove', resizeTouch);
+                document.removeEventListener('touchend', resizeTouchEnd);
+            }
         }
-
-        // Process the manually selected crop area with simplified approach
+        
+        // Process the manually selected crop area
         function cropManualSelection(imgElement, cropArea) {
             logDebug(`Processing manual crop: x=${cropArea.x}, y=${cropArea.y}, w=${cropArea.width}, h=${cropArea.height}`);
             
@@ -1714,13 +1539,12 @@
                 // Create canvas for cropped image
                 const canvas = document.getElementById('croppingCanvas');
                 
-                // For iOS, further reduce size to save memory
-                const MAX_DIMENSION = 600;  // Reduced from 800 for even better iOS performance
+                // Keep size reasonable
+                const MAX_SIZE = 800;
                 let scaleFactor = 1;
                 
-                if (cropArea.width > MAX_DIMENSION || cropArea.height > MAX_DIMENSION) {
-                    scaleFactor = Math.min(MAX_DIMENSION / cropArea.width, MAX_DIMENSION / cropArea.height);
-                    logDebug(`Scaling manual crop by factor ${scaleFactor}`);
+                if (cropArea.width > MAX_SIZE || cropArea.height > MAX_SIZE) {
+                    scaleFactor = Math.min(MAX_SIZE / cropArea.width, MAX_SIZE / cropArea.height);
                     cropArea.width *= scaleFactor;
                     cropArea.height *= scaleFactor;
                     cropArea.x *= scaleFactor;
@@ -1730,103 +1554,64 @@
                 canvas.width = cropArea.width;
                 canvas.height = cropArea.height;
                 const ctx = canvas.getContext('2d');
-                                // Clear any previous content
+                
+                // Clear canvas
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
-                // Draw only the selected portion
+                // Draw the cropped portion
                 ctx.drawImage(
                     imgElement,
-                    cropArea.x, cropArea.y, cropArea.width, cropArea.height, // Source coordinates
-                    0, 0, canvas.width, canvas.height // Destination coordinates
+                    cropArea.x, cropArea.y, cropArea.width, cropArea.height,
+                    0, 0, canvas.width, canvas.height
                 );
                 
                 // Display cropped image
                 const croppedPreview = document.getElementById('croppedPreview');
-                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.7); // Lower quality for better performance
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.7);
                 croppedPreview.style.display = 'block';
                 
-                // Show the loading indicator
+                // Run basic OCR directly on the canvas
+                document.getElementById('ocrProgressText').textContent = 'Reading text...';
+                document.getElementById('ocrProgress').style.width = '50%';
                 document.getElementById('scanningMessage').style.display = 'block';
-                document.getElementById('ocrProgressText').textContent = 'Processing cropped image...';
-                document.getElementById('ocrProgress').style.width = '20%';
                 
-                logDebug("Manual crop successful, proceeding to OCR");
+                // Set timeout
+                const ocrTimeout = setTimeout(() => {
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    alert("Text recognition is taking too long. Please enter text manually.");
+                    switchTab('textInput');
+                }, 15000);
                 
-                // Use simplified OCR approach for iOS
-                performEnhancedOCR(canvas);
+                // Use Tesseract directly 
+                Tesseract.recognize(canvas, {
+                    lang: 'eng',
+                    langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data'
+                })
+                .then(result => {
+                    clearTimeout(ocrTimeout);
+                    
+                    // Show the text
+                    document.getElementById('extractedText').value = result.data.text;
+                    document.getElementById('extractedTextContainer').style.display = 'block';
+                    document.getElementById('ingredients').value = result.data.text;
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    document.getElementById('stepOcr').classList.add('active');
+                    
+                    // Proceed with analysis
+                    testIngredients();
+                })
+                .catch(error => {
+                    clearTimeout(ocrTimeout);
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    alert("Error reading text. Please enter text manually.");
+                    switchTab('textInput');
+                });
+                
             } catch (error) {
-                logDebug(`Error in manual crop: ${error.message}`);
-                alert("Error processing the selected area. Please try selecting a different area or use text input.");
                 document.getElementById('scanningMessage').style.display = 'none';
-                
-                // Enable text entry as fallback
+                alert("Error processing selection. Please enter text manually.");
                 switchTab('textInput');
             }
-        }
-        
-        // UI function for text enhancement button
-        function enhanceTextUI() {
-            const extractedText = document.getElementById('extractedText').value;
-            
-            if (!extractedText.trim()) {
-                return;
-            }
-            
-            logDebug("Enhancing text format");
-            
-            // Status update
-            const statusElement = document.getElementById('textEnhancementStatus');
-            statusElement.style.display = 'block';
-            statusElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Improving text format...';
-            statusElement.style.color = 'var(--accent-color)';
-            
-            // Apply advanced formatting
-            try {
-                const formatted = window.enhanceIngredientText(extractedText);
-                
-                // Update the text
-                document.getElementById('extractedText').value = formatted;
-                document.getElementById('ingredients').value = formatted;
-                
-                // Update status
-                statusElement.innerHTML = '<i class="fas fa-check-circle"></i> Text formatting improved';
-                statusElement.style.color = 'var(--success-color)';
-                
-                logDebug("Text enhancement completed");
-                
-                // Hide status after a few seconds
-                setTimeout(() => {
-                    statusElement.style.display = 'none';
-                }, 3000);
-                
-            } catch (error) {
-                logDebug(`Error enhancing text: ${error.message}`);
-                statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Could not enhance text';
-                statusElement.style.color = 'var(--warning-color)';
-            }
-        }
-        
-        // Ultra-conservative detection algorithm
-        function analyzeIngredientsForSafety(data) {
-            // Force more cautious interpretation of results
-            if (data.flagged_ingredients && data.flagged_ingredients.length > 0) {
-                // Any confidence > 50% should be treated as unsafe
-                if (data.flagged_ingredients.some(i => i.confidence > 0.5)) {
-                    data.is_gluten_free = false;
-                    data.message = "Potentially unsafe: Contains suspicious ingredients.";
-                } 
-                // Even low confidence should be highlighted as caution
-                else {
-                    data.message = "Exercise caution: Some ingredients need verification.";
-                }
-            }
-            
-            // Add explicit statement about cross-contamination
-            if (data.is_gluten_free) {
-                data.message += " However, always check for cross-contamination risks.";
-            }
-            
-            return data;
         }
         
         // Test ingredients with API
@@ -1853,7 +1638,7 @@
             logDebug("Sending ingredients to analysis API");
             
             try {
-                // API URL
+                              // API URL
                 const apiUrl = 'https://gluten-free-scanner-api.onrender.com/analyze';
                 
                 const response = await fetch(apiUrl, {
@@ -1868,9 +1653,6 @@
                 
                 logDebug(`API response received: ${data.is_gluten_free ? "Gluten-free" : "Contains gluten"}`);
                 
-                // Apply enhanced safety algorithm
-                data = analyzeIngredientsForSafety(data);
-                
                 // Format the result for better readability
                 let resultHTML = '';
                 
@@ -1878,7 +1660,7 @@
                 if (data.is_gluten_free) {
                     resultDiv.className = 'safe';
                     resultHTML += '<div class="result-header"><i class="fas fa-check-circle"></i> SAFE: ' + data.message + '</div>';
-                } else if (data.flagged_ingredients.some(i => i.confidence > 0.7)) {
+                } else if (data.flagged_ingredients && data.flagged_ingredients.some(i => i.confidence > 0.7)) {
                     resultDiv.className = 'unsafe';
                     resultHTML += '<div class="result-header"><i class="fas fa-exclamation-triangle"></i> UNSAFE: ' + data.message + '</div>';
                 } else {
@@ -1931,40 +1713,17 @@
                             <li><strong>Wheat derivatives</strong> - Look for ingredients like modified food starch, maltodextrin, and caramel color, which may contain gluten depending on their source.</li>
                             <li><strong>Hidden sources</strong> - Be aware that "natural flavors" and "spices" can sometimes contain gluten-derived ingredients.</li>
                             <li><strong>Cross-contamination</strong> - Products manufactured on shared equipment may have cross-contamination risks not reflected in the ingredient list.</li>
-                            <li><strong>Processing aids</strong> - Some ingredients used in processing may not be listed but could contain gluten.</li>
-                            <li><strong>Regional differences</strong> - Ingredients like "glucose syrup" may be gluten-derived in some countries but corn-derived in others.</li>
                         </ul>
                     </div>
-                    <p class="disclaimer"><strong>Important:</strong> This tool provides guidance but cannot replace medical advice. Always consult your healthcare provider with concerns.</p>
+                    <p class="disclaimer"><strong>Important:</strong> This tool provides guidance but cannot replace medical advice.</p>
                 </div>`;
                 
                 // Add cross-contamination notice
                 resultHTML += `
                 <div class="cross-contamination-notice">
                     <h3 class="section-title">Cross-Contamination Risk</h3>
-                    <p>Even if ingredients appear safe, manufacturing processes can introduce gluten. Look for "May contain" statements or contact manufacturer for dedicated gluten-free facilities.</p>
+                    <p>Even if ingredients appear safe, manufacturing processes can introduce gluten. Check for "May contain" statements.</p>
                 </div>`;
-                
-                // Add recommended next steps
-                resultHTML += `
-                <div class="next-steps">
-                    <h3 class="section-title">Recommended Next Steps</h3>
-                    <ul>
-                        ${data.is_gluten_free ? 
-                            '<li>Look for "May contain wheat" or "Processed in a facility" warnings on packaging</li>' +
-                            '<li>For sensitive individuals, consider products certified gluten-free by a third party</li>' : 
-                            '<li>Look for alternative products specifically labeled as certified gluten-free</li>' +
-                            '<li>Contact the manufacturer to confirm exact ingredient sources if needed</li>'
-                        }
-                        <li>When in doubt about an ingredient, err on the side of caution</li>
-                    </ul>
-                </div>`;
-                
-                // Add raw JSON for reference (collapsible)
-                resultHTML += '<details>';
-                resultHTML += '<summary>Show API Response Details</summary>';
-                resultHTML += '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-                resultHTML += '</details>';
                 
                 resultDiv.innerHTML = resultHTML;
                 
