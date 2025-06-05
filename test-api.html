@@ -827,6 +827,12 @@
                 <span>Click or drag to upload image</span>
             </label>
             
+            <div class="button-group" style="margin-top: 15px;">
+                <button class="primary" onclick="skipToManualEntry()">
+                    <i class="fas fa-keyboard"></i> Skip OCR & Enter Text Manually
+                </button>
+            </div>
+            
             <div class="button-group">
                 <button class="secondary" onclick="openCamera()">
                     <i class="fas fa-camera"></i> Take Photo with Camera
@@ -1132,13 +1138,13 @@
             
             // Wait for image to load fully
             if (imgElement.complete) {
-                logDebug("Image already loaded, proceeding with detection");
-                simpleDetectAndCrop(imgElement);
+                logDebug("Image already loaded, proceeding to crop");
+                cropAndRecognizeText(imgElement);
             } else {
                 logDebug("Waiting for image to load");
                 imgElement.onload = function() {
-                    logDebug("Image loaded, proceeding with detection");
-                    simpleDetectAndCrop(imgElement);
+                    logDebug("Image loaded, proceeding to crop");
+                    cropAndRecognizeText(imgElement);
                 };
             }
         }
@@ -1150,143 +1156,106 @@
             switchTab('textInput');
         }
         
-        // Simple detection - just use the bottom half of the image
-        function simpleDetectAndCrop(imgElement) {
-            logDebug("Using simple detection approach");
-            document.getElementById('stepDetect').classList.add('active');
+        // Use this function for both automatic and manual crop
+        function processImageWithOCR(canvas) {
+            // Show loading
+            document.getElementById('scanningMessage').style.display = 'block';
+            document.getElementById('ocrProgressText').textContent = 'Reading text...';
+            document.getElementById('ocrProgress').style.width = '50%';
             
-            // Default to bottom half of the image which often contains ingredients
-            const cropArea = {
-                x: 0,
-                y: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5),
-                width: imgElement.naturalWidth || imgElement.width,
-                height: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5)
-            };
+            // SHORT timeout - only 8 seconds
+            const ocrTimeout = setTimeout(() => {
+                document.getElementById('scanningMessage').style.display = 'none';
+                document.getElementById('extractedTextContainer').style.display = 'block';
+                document.getElementById('ocrConfidence').innerHTML = 
+                    "<strong>OCR taking too long.</strong> Please enter text manually.";
+                document.getElementById('ocrConfidence').style.display = 'block';
+                
+                // Switch to text input as fallback
+                alert("For faster results, you can type the ingredients text manually.");
+                switchTab('textInput');
+            }, 8000);  // Only 8 seconds timeout
             
-            // Continue with simplified cropping and OCR
-            cropAndRecognizeText(imgElement, null, cropArea);
+            // Direct OCR call - no preprocessing
+            Tesseract.recognize(canvas, {
+                lang: 'eng',
+                langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
+                tessedit_pageseg_mode: '6',
+                tessedit_ocr_engine_mode: '2'
+            })
+            .then(result => {
+                clearTimeout(ocrTimeout);
+                
+                // Display result
+                document.getElementById('extractedText').value = result.data.text;
+                document.getElementById('extractedTextContainer').style.display = 'block';
+                document.getElementById('ingredients').value = result.data.text;
+                document.getElementById('scanningMessage').style.display = 'none';
+                
+                // Continue with analysis if we got text
+                if (result.data.text.trim()) {
+                    testIngredients();
+                } else {
+                    // No text found
+                    document.getElementById('ocrConfidence').innerHTML = 
+                        "<strong>No text detected.</strong> Please enter text manually.";
+                    document.getElementById('ocrConfidence').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                clearTimeout(ocrTimeout);
+                document.getElementById('scanningMessage').style.display = 'none';
+                document.getElementById('extractedTextContainer').style.display = 'block';
+                document.getElementById('ocrConfidence').innerHTML = 
+                    "<strong>Text recognition failed.</strong> Please enter text manually.";
+                document.getElementById('ocrConfidence').style.display = 'block';
+            });
         }
         
-        // Simplified crop and OCR function
-        function cropAndRecognizeText(imgElement, bbox = null, ingredientsBbox = null) {
-            logDebug("Starting simplified crop and recognize");
-            
+        // Replace cropAndRecognizeText function with this simpler version
+        function cropAndRecognizeText(imgElement) {
             try {
-                // Determine cropping area
-                let cropArea;
-                if (ingredientsBbox) {
-                    logDebug("Using detected ingredients area");
-                    cropArea = ingredientsBbox;
-                } else if (bbox) {
-                    logDebug("Using object detection bbox");
-                    cropArea = {
-                        x: bbox[0],
-                        y: bbox[1],
-                        width: bbox[2],
-                        height: bbox[3]
-                    };
-                } else {
-                    logDebug("Using bottom half of image as default");
-                    // Default to bottom half of the image
-                    cropArea = {
-                        x: 0,
-                        y: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5),
-                        width: imgElement.naturalWidth || imgElement.width,
-                        height: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5)
-                    };
-                }
+                // Default to bottom half of the image
+                const cropArea = {
+                    x: 0,
+                    y: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5),
+                    width: imgElement.naturalWidth || imgElement.width,
+                    height: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5)
+                };
                 
-                // Create canvas for cropped image - use smaller size
+                // Create small canvas
                 const canvas = document.getElementById('croppingCanvas');
-                const MAX_SIZE = 800; 
+                const MAX_SIZE = 600;
                 let scaleFactor = 1;
                 
                 if (cropArea.width > MAX_SIZE || cropArea.height > MAX_SIZE) {
                     scaleFactor = Math.min(MAX_SIZE / cropArea.width, MAX_SIZE / cropArea.height);
-                    logDebug(`Scaling image by factor ${scaleFactor}`);
                 }
                 
                 canvas.width = Math.floor(cropArea.width * scaleFactor);
                 canvas.height = Math.floor(cropArea.height * scaleFactor);
                 const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
-                // Draw the cropped portion
+                // Draw the cropped image
                 ctx.drawImage(
                     imgElement,
-                    cropArea.x, cropArea.y, cropArea.width, cropArea.height,
+                    cropArea.x, cropArea.y, cropArea.width, cropArea.height, 
                     0, 0, canvas.width, canvas.height
                 );
                 
-                // Display cropped image
+                // Show preview
                 const croppedPreview = document.getElementById('croppedPreview');
-                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.7);
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.6);
                 croppedPreview.style.display = 'block';
                 
-                // Run OCR directly on the canvas
+                // Process with OCR
+                document.getElementById('stepDetect').classList.add('active');
                 document.getElementById('stepOcr').classList.add('active');
-                document.getElementById('scanningMessage').style.display = 'block';
-                document.getElementById('ocrProgressText').textContent = 'Reading text...';
-                document.getElementById('ocrProgress').style.width = '50%';
+                processImageWithOCR(canvas);
                 
-                // Set a short timeout
-                const ocrTimeout = setTimeout(() => {
-                    document.getElementById('scanningMessage').style.display = 'none';
-                    document.getElementById('extractedTextContainer').style.display = 'block';
-                    document.getElementById('ocrConfidence').style.display = 'block';
-                    document.getElementById('ocrConfidence').textContent = "⚠️ Text recognition is taking too long. Please try manual text entry.";
-                    logDebug("OCR timed out after 15 seconds");
-                }, 15000);
-                
-                try {
-                    // Direct Tesseract call without our enhanced-ocr.js complexity
-                    Tesseract.recognize(canvas, {
-                        lang: 'eng',
-                        langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data'
-                    })
-                    .then(result => {
-                        clearTimeout(ocrTimeout);
-                        
-                        // Display extracted text
-                        document.getElementById('extractedText').value = result.data.text;
-                        document.getElementById('extractedTextContainer').style.display = 'block';
-                        document.getElementById('ingredients').value = result.data.text;
-                        document.getElementById('scanningMessage').style.display = 'none';
-                        
-                        // Show confidence warning if needed
-                        if (result.data.confidence < 70) {
-                            document.getElementById('ocrConfidence').textContent = 
-                                `⚠️ Text recognition may not be accurate. Please verify or edit the text.`;
-                            document.getElementById('ocrConfidence').style.display = 'block';
-                        }
-                        
-                        // Continue with analysis
-                        testIngredients();
-                    })
-                    .catch(error => {
-                        clearTimeout(ocrTimeout);
-                        logDebug(`Error in OCR: ${error.message}`);
-                        
-                        document.getElementById('scanningMessage').style.display = 'none';
-                        document.getElementById('extractedTextContainer').style.display = 'block';
-                        document.getElementById('ocrConfidence').textContent = 
-                            `⚠️ Text recognition failed. Please enter text manually.`;
-                        document.getElementById('ocrConfidence').style.display = 'block';
-                    });
-                } catch (error) {
-                    clearTimeout(ocrTimeout);
-                    logDebug(`Error in OCR: ${error.message}`);
-                    
-                    document.getElementById('scanningMessage').style.display = 'none';
-                    document.getElementById('extractedTextContainer').style.display = 'block';
-                    document.getElementById('ocrConfidence').textContent = 
-                        `⚠️ Text recognition failed. Please enter text manually.`;
-                    document.getElementById('ocrConfidence').style.display = 'block';
-                }
             } catch (error) {
-                logDebug(`Error in crop and recognize: ${error.message}`);
                 document.getElementById('scanningMessage').style.display = 'none';
-                alert("Error processing image. Please try entering text manually.");
+                alert("Error processing image. Try manual selection or text entry.");
             }
         }
 
@@ -1533,14 +1502,12 @@
         
         // Process the manually selected crop area
         function cropManualSelection(imgElement, cropArea) {
-            logDebug(`Processing manual crop: x=${cropArea.x}, y=${cropArea.y}, w=${cropArea.width}, h=${cropArea.height}`);
-            
             try {
-                // Create canvas for cropped image
+                // Create small canvas for cropped image
                 const canvas = document.getElementById('croppingCanvas');
                 
-                // Keep size reasonable
-                const MAX_SIZE = 800;
+                // Use very small size for better performance
+                const MAX_SIZE = 600;  // Even smaller than before
                 let scaleFactor = 1;
                 
                 if (cropArea.width > MAX_SIZE || cropArea.height > MAX_SIZE) {
@@ -1554,8 +1521,6 @@
                 canvas.width = cropArea.width;
                 canvas.height = cropArea.height;
                 const ctx = canvas.getContext('2d');
-                
-                // Clear canvas
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
                 // Draw the cropped portion
@@ -1565,47 +1530,14 @@
                     0, 0, canvas.width, canvas.height
                 );
                 
-                // Display cropped image
+                // Show preview
                 const croppedPreview = document.getElementById('croppedPreview');
-                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.7);
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.6);  // Lower quality
                 croppedPreview.style.display = 'block';
                 
-                // Run basic OCR directly on the canvas
-                document.getElementById('ocrProgressText').textContent = 'Reading text...';
-                document.getElementById('ocrProgress').style.width = '50%';
-                document.getElementById('scanningMessage').style.display = 'block';
-                
-                // Set timeout
-                const ocrTimeout = setTimeout(() => {
-                    document.getElementById('scanningMessage').style.display = 'none';
-                    alert("Text recognition is taking too long. Please enter text manually.");
-                    switchTab('textInput');
-                }, 15000);
-                
-                // Use Tesseract directly 
-                Tesseract.recognize(canvas, {
-                    lang: 'eng',
-                    langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data'
-                })
-                .then(result => {
-                    clearTimeout(ocrTimeout);
-                    
-                    // Show the text
-                    document.getElementById('extractedText').value = result.data.text;
-                    document.getElementById('extractedTextContainer').style.display = 'block';
-                    document.getElementById('ingredients').value = result.data.text;
-                    document.getElementById('scanningMessage').style.display = 'none';
-                    document.getElementById('stepOcr').classList.add('active');
-                    
-                    // Proceed with analysis
-                    testIngredients();
-                })
-                .catch(error => {
-                    clearTimeout(ocrTimeout);
-                    document.getElementById('scanningMessage').style.display = 'none';
-                    alert("Error reading text. Please enter text manually.");
-                    switchTab('textInput');
-                });
+                // Process with ultra-simplified OCR
+                document.getElementById('stepOcr').classList.add('active');
+                processImageWithOCR(canvas);
                 
             } catch (error) {
                 document.getElementById('scanningMessage').style.display = 'none';
@@ -1638,7 +1570,7 @@
             logDebug("Sending ingredients to analysis API");
             
             try {
-                              // API URL
+                // API URL
                 const apiUrl = 'https://gluten-free-scanner-api.onrender.com/analyze';
                 
                 const response = await fetch(apiUrl, {
