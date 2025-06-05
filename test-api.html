@@ -3,6 +3,8 @@
 <head>
     <title>Gluten-Free Scanner Tester</title>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <style>
@@ -351,6 +353,14 @@
             display: none;
         }
 
+        #croppedPreview {
+            max-width: 100%;
+            border-radius: var(--border-radius);
+            margin: 15px 0;
+            display: none;
+            border: 2px solid var(--accent-color);
+        }
+
         .progress-container {
             width: 100%;
             background-color: var(--bg-tertiary);
@@ -566,6 +576,75 @@
             margin-top: 0;
             margin-bottom: 8px;
         }
+
+        /* New crop-related styles */
+        #croppingCanvas {
+            display: none;
+            max-width: 100%;
+            margin: 15px 0;
+            border-radius: var(--border-radius);
+        }
+
+        .detection-overlay {
+            position: absolute;
+            border: 2px solid var(--accent-color);
+            background-color: rgba(114, 137, 218, 0.1);
+            pointer-events: none;
+        }
+
+        .relative-container {
+            position: relative;
+            margin: 15px 0;
+            display: inline-block;
+        }
+
+        .processing-steps {
+            display: flex;
+            margin: 20px 0;
+            overflow-x: auto;
+            gap: 15px;
+            padding-bottom: 10px;
+        }
+
+        .processing-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 100px;
+        }
+
+        .step-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+
+        .step-icon.active {
+            background-color: var(--accent-color);
+        }
+
+        .step-icon i {
+            color: var(--text-secondary);
+        }
+
+        .step-icon.active i {
+            color: white;
+        }
+
+        .step-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .image-processing-container {
+            position: relative;
+        }
     </style>
 </head>
 <body>
@@ -580,7 +659,7 @@
             <div class="feature-card">
                 <i class="fas fa-camera"></i>
                 <h3>Photo Scanning</h3>
-                <p>Take a photo of any ingredient list and our OCR technology will extract the text automatically.</p>
+                <p>Take a photo of any ingredient list and our AI will automatically find, crop, and analyze the ingredients.</p>
             </div>
             <div class="feature-card">
                 <i class="fas fa-search"></i>
@@ -602,24 +681,24 @@
         <div class="step">
             <div class="step-number">1</div>
             <div class="step-content">
-                <h3>Scan or Enter Ingredients</h3>
-                <p>Upload a photo of an ingredient list using your camera or gallery, or manually type the ingredients text.</p>
+                <h3>Take a Photo</h3>
+                <p>Snap a picture of an ingredient list using your camera or upload one from your gallery.</p>
             </div>
         </div>
         
         <div class="step">
             <div class="step-number">2</div>
             <div class="step-content">
-                <h3>Review the Analysis</h3>
-                <p>The system will identify any potentially unsafe ingredients and provide a safety assessment.</p>
+                <h3>AI Processing</h3>
+                <p>Our system will automatically detect the ingredients text, extract it, and analyze for gluten content.</p>
             </div>
         </div>
         
         <div class="step">
             <div class="step-number">3</div>
             <div class="step-content">
-                <h3>Make an Informed Decision</h3>
-                <p>Use the detailed analysis and safety tips to decide whether a product is safe for your dietary needs.</p>
+                <h3>Review Results</h3>
+                <p>Check the detailed analysis to make informed decisions about the product's safety.</p>
             </div>
         </div>
         
@@ -646,7 +725,7 @@
             
             <div class="button-group">
                 <button class="secondary" onclick="openCamera()">
-                    <i class="fas fa-camera"></i> Open Camera
+                    <i class="fas fa-camera"></i> Take Photo with Camera
                 </button>
             </div>
             
@@ -661,31 +740,68 @@
                     </button>
                 </div>
             </div>
+
+            <!-- Processing steps indicator -->
+            <div class="processing-steps" id="processingSteps" style="display: none;">
+                <div class="processing-step">
+                    <div class="step-icon" id="stepUpload">
+                        <i class="fas fa-upload"></i>
+                    </div>
+                    <div class="step-label">Upload</div>
+                </div>
+                <div class="processing-step">
+                    <div class="step-icon" id="stepDetect">
+                        <i class="fas fa-crop-alt"></i>
+                    </div>
+                    <div class="step-label">Detect Text</div>
+                </div>
+                <div class="processing-step">
+                    <div class="step-icon" id="stepOcr">
+                        <i class="fas fa-font"></i>
+                    </div>
+                    <div class="step-label">Extract Text</div>
+                </div>
+                <div class="processing-step">
+                    <div class="step-icon" id="stepAnalyze">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <div class="step-label">Analyze</div>
+                </div>
+            </div>
             
-            <img id="imagePreview" alt="Uploaded image preview">
+            <div class="image-processing-container">
+                <div class="relative-container" id="imageContainer">
+                    <img id="imagePreview" alt="Uploaded image preview">
+                    <!-- Detection overlays will be added here dynamically -->
+                </div>
+                <img id="croppedPreview" alt="Cropped ingredients" style="display: none;">
+                <canvas id="croppingCanvas" style="display: none;"></canvas>
+            </div>
             
             <div class="loading" id="scanningMessage">
-                <p class="section-title">Scanning image</p>
+                <p class="section-title">Processing image</p>
                 <div class="progress-container">
                     <div class="progress-bar" id="ocrProgress"></div>
                 </div>
                 <div class="progress-text" id="ocrProgressText">0%</div>
             </div>
             
-            <p class="section-title">Extracted text</p>
-            <textarea id="extractedText" placeholder="Text will appear here after scanning..." readonly></textarea>
-            
-            <!-- OCR confidence warning -->
-            <div id="ocrConfidence"></div>
-            
-            <div class="button-group">
-                <button id="scanButton" class="primary" onclick="scanImage()" disabled>
-                    <i class="fas fa-magic"></i> Scan Image
-                </button>
-                <button id="useTextButton" class="secondary" onclick="useExtractedText()" disabled>
-                    <i class="fas fa-check"></i> Use This Text
-                </button>
+            <div id="extractedTextContainer" style="display: none;">
+                <p class="section-title">Extracted text</p>
+                <textarea id="extractedText" placeholder="Text will appear here after scanning..." readonly></textarea>
+                <div id="ocrConfidence"></div>
+                
+                <div class="button-group">
+                    <button id="useTextButton" class="secondary" onclick="useExtractedText()">
+                        <i class="fas fa-check"></i> Edit Text
+                    </button>
+                    <button id="reScanButton" class="secondary" onclick="resetProcessing()">
+                        <i class="fas fa-redo"></i> Try Again
+                    </button>
+                </div>
             </div>
+            
+            <!-- Manual controls removed for streamlined flow -->
         </div>
         
         <div id="textInput" class="tab-content">
@@ -706,6 +822,23 @@
         // For camera access
         let stream = null;
         let videoElement = document.getElementById('video');
+        let cocoModel = null;
+        
+        // Load COCO-SSD model for object detection
+        async function loadObjectDetectionModel() {
+            try {
+                cocoModel = await cocoSsd.load();
+                console.log("Object detection model loaded");
+            } catch(error) {
+                console.error("Error loading object detection model:", error);
+            }
+        }
+        
+        // Load model on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            loadObjectDetectionModel();
+            switchTab('photoInput');
+        });
         
         // Switch between tabs
         function switchTab(tabId) {
@@ -753,11 +886,11 @@
             imgPreview.src = canvas.toDataURL('image/jpeg');
             imgPreview.style.display = 'block';
             
-            // Enable scan button
-            document.getElementById('scanButton').disabled = false;
-            
             // Close camera
             closeCamera();
+            
+            // Start automated processing
+            startAutomatedProcessing(imgPreview);
         }
         
         // Handle image upload
@@ -769,29 +902,141 @@
                     const imgPreview = document.getElementById('imagePreview');
                     imgPreview.src = e.target.result;
                     imgPreview.style.display = 'block';
-                    document.getElementById('scanButton').disabled = false;
+                    
+                    // Start automated processing
+                    startAutomatedProcessing(imgPreview);
                 }
                 reader.readAsDataURL(file);
             }
         });
-        
-        // Enhanced OCR implementation
-        async function scanImage() {
-            const imgPreview = document.getElementById('imagePreview');
-            if (!imgPreview.src) {
-                alert("Please upload an image first.");
-                return;
-            }
+
+        // New function to start automated processing
+        function startAutomatedProcessing(imgElement) {
+            // Show processing steps
+            document.getElementById('processingSteps').style.display = 'flex';
+            document.getElementById('stepUpload').classList.add('active');
             
-            // Show scanning message
-            document.getElementById('scanningMessage').style.display = 'block';
+            // Reset any previous results
+            document.getElementById('extractedTextContainer').style.display = 'none';
             document.getElementById('extractedText').value = '';
-            document.getElementById('useTextButton').disabled = true;
             document.getElementById('ocrConfidence').style.display = 'none';
+            document.getElementById('croppedPreview').style.display = 'none';
+            
+            // Remove any previous detection overlays
+            const container = document.getElementById('imageContainer');
+            Array.from(container.querySelectorAll('.detection-overlay')).forEach(el => el.remove());
+            
+            // Wait for image to load fully
+            if (imgElement.complete) {
+                detectIngredientsArea(imgElement);
+            } else {
+                imgElement.onload = function() {
+                    detectIngredientsArea(imgElement);
+                };
+            }
+        }
+        
+        // Detect ingredients area using object detection
+        async function detectIngredientsArea(imgElement) {
+            try {
+                // Update progress indicator
+                document.getElementById('stepDetect').classList.add('active');
+                document.getElementById('scanningMessage').style.display = 'block';
+                document.getElementById('ocrProgressText').textContent = 'Detecting ingredients area...';
+                document.getElementById('ocrProgress').style.width = '20%';
+                
+                // If model is not loaded, try loading it
+                if (!cocoModel) {
+                    await loadObjectDetectionModel();
+                }
+                
+                if (cocoModel) {
+                    // Use object detection to find text areas
+                    const predictions = await cocoModel.detect(imgElement);
+                    
+                    // Look for text or books or similar objects that might contain ingredients
+                    const textRelatedObjects = predictions.filter(pred => 
+                        ['book', 'text', 'label', 'paper', 'box', 'bottle'].includes(pred.class) ||
+                        pred.score > 0.7 // If high confidence, include it
+                    );
+                    
+                    if (textRelatedObjects.length > 0) {
+                        // Found potential text areas, create crop boundaries
+                        console.log("Found potential text areas:", textRelatedObjects);
+                        
+                        // Use the highest confidence prediction for cropping
+                        const bestMatch = textRelatedObjects.reduce((best, current) => 
+                            current.score > best.score ? current : best, textRelatedObjects[0]);
+                        
+                        // Add visual indicator of detected area
+                        const container = document.getElementById('imageContainer');
+                        const overlay = document.createElement('div');
+                        overlay.className = 'detection-overlay';
+                        
+                        // Calculate position relative to the image
+                        const imgRect = imgElement.getBoundingClientRect();
+                        const scaleX = imgElement.width / imgElement.naturalWidth;
+                        const scaleY = imgElement.height / imgElement.naturalHeight;
+                        
+                        overlay.style.left = `${bestMatch.bbox[0] * scaleX}px`;
+                        overlay.style.top = `${bestMatch.bbox[1] * scaleY}px`;
+                        overlay.style.width = `${bestMatch.bbox[2] * scaleX}px`;
+                        overlay.style.height = `${bestMatch.bbox[3] * scaleY}px`;
+                        
+                        container.appendChild(overlay);
+                        
+                        // Continue with cropping and OCR
+                        cropAndRecognizeText(imgElement, bestMatch.bbox);
+                    } else {
+                        // No text areas found, try full image recognition
+                        console.log("No specific text areas detected, processing full image");
+                        enhanceAndRecognizeText(imgElement);
+                    }
+                } else {
+                    // If model failed to load, just enhance and process the full image
+                    console.log("Object detection model not available, processing full image");
+                    enhanceAndRecognizeText(imgElement);
+                }
+            } catch (error) {
+                console.error("Error during detection:", error);
+                // Fallback to full image processing
+                enhanceAndRecognizeText(imgElement);
+            }
+        }
+        
+        // Crop image and process text
+        function cropAndRecognizeText(imgElement, bbox) {
+            const canvas = document.getElementById('croppingCanvas');
+            canvas.width = bbox[2];
+            canvas.height = bbox[3];
+            const ctx = canvas.getContext('2d');
+            
+            // Draw only the cropped portion
+            ctx.drawImage(
+                imgElement,
+                bbox[0], bbox[1], bbox[2], bbox[3], // Source coordinates
+                0, 0, bbox[2], bbox[3] // Destination coordinates
+            );
+            
+            // Display cropped image
+            const croppedPreview = document.getElementById('croppedPreview');
+            croppedPreview.src = canvas.toDataURL('image/png');
+            croppedPreview.style.display = 'block';
+            
+            // Enhance and recognize the cropped text
+            enhanceAndRecognizeText(canvas);
+        }
+        
+        // Enhance image and perform OCR
+        async function enhanceAndRecognizeText(imageElement) {
+            // Update progress indicator
+            document.getElementById('stepOcr').classList.add('active');
+            document.getElementById('ocrProgressText').textContent = 'Extracting text...';
+            document.getElementById('ocrProgress').style.width = '50%';
             
             try {
                 // Image preprocessing
-                const enhancedImage = await preprocessImage(imgPreview.src);
+                const enhancedImage = await preprocessImage(imageElement);
                 
                 // First OCR attempt with default settings
                 const result1 = await performOCR(enhancedImage, { rotateAuto: true });
@@ -806,21 +1051,27 @@
                 const combinedText = mergeOCRResults(result1, result2);
                 const cleanedText = postprocessText(combinedText);
                 
+                // Display extracted text
                 document.getElementById('extractedText').value = cleanedText;
-                document.getElementById('useTextButton').disabled = false;
-                document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('ocrProgress').style.width = '0%';
+                document.getElementById('extractedTextContainer').style.display = 'block';
                 
-                // Provide confidence feedback
+                // Check confidence and show warning if needed
                 const confidence = Math.min(result1.confidence || 0, result2.confidence || 0);
                 if (confidence < 70) {
                     document.getElementById('ocrConfidence').textContent = 
-                        "⚠️ Warning: Text recognition confidence is low. Please verify the extracted text carefully.";
+                        "⚠️ Warning: Text recognition confidence is low. Please verify the extracted text.";
                     document.getElementById('ocrConfidence').style.display = 'block';
                 }
+                
+                // Continue with automatic analysis
+                document.getElementById('ingredients').value = cleanedText;
+                testIngredients();
+                
             } catch (error) {
-                alert("Error scanning image: " + error.message);
+                console.error("Error during OCR:", error);
+                alert("Error extracting text: " + error.message);
                 document.getElementById('scanningMessage').style.display = 'none';
+                document.getElementById('ocrProgress').style.width = '0%';
             }
         }
 
@@ -835,8 +1086,9 @@
                             const progressBar = document.getElementById('ocrProgress');
                             const progressText = document.getElementById('ocrProgressText');
                             const percent = Math.round(progress.progress * 100);
-                            progressBar.style.width = percent + '%';
-                            progressText.textContent = percent + '% complete';
+                            const overallPercent = 50 + Math.round(progress.progress * 30); // Scale to 50-80% of overall process
+                            progressBar.style.width = overallPercent + '%';
+                            progressText.textContent = `Extracting text: ${percent}% complete`;
                         }
                     },
                     ...options
@@ -849,40 +1101,89 @@
         async function preprocessImage(src) {
             // Create a canvas and get its context
             const img = new Image();
-            await new Promise(resolve => {
-                img.onload = resolve;
-                img.src = src;
-            });
             
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            
-            // Draw original image
-            ctx.drawImage(img, 0, 0);
-            
-            // Get image data
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            
-            // Apply basic contrast enhancement
-            for (let i = 0; i < data.length; i += 4) {
-                // Convert to grayscale
-                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            // Handle both Image elements and canvas elements
+            if(src.tagName === 'IMG' || src.tagName === 'CANVAS') {
+                // If src is an HTML element
+                if(src.tagName === 'CANVAS') {
+                    return src.toDataURL('image/png');
+                } else {
+                    // For IMG element
+                    await new Promise(resolve => {
+                        if(src.complete) {
+                            resolve();
+                        } else {
+                            src.onload = resolve;
+                        }
+                    });
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.width = src.naturalWidth || src.width;
+                    canvas.height = src.naturalHeight || src.height;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Draw original image
+                    ctx.drawImage(src, 0, 0);
+                    
+                    // Get image data
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imageData.data;
+                    
+                    // Apply basic contrast enhancement
+                    for (let i = 0; i < data.length; i += 4) {
+                        // Convert to grayscale
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        
+                        // Apply threshold for better text contrast
+                        const newValue = avg > 128 ? 255 : 0;
+                        
+                        data[i] = newValue;     // r
+                        data[i + 1] = newValue; // g
+                        data[i + 2] = newValue; // b
+                    }
+                    
+                    // Put the enhanced image data back on the canvas
+                    ctx.putImageData(imageData, 0, 0);
+                    
+                    return canvas.toDataURL('image/png');
+                }
+            } else {
+                // If src is a URL
+                await new Promise(resolve => {
+                    img.onload = resolve;
+                    img.src = src;
+                });
                 
-                // Apply threshold for better text contrast
-                const newValue = avg > 128 ? 255 : 0;
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
                 
-                data[i] = newValue;     // r
-                data[i + 1] = newValue; // g
-                data[i + 2] = newValue; // b
+                // Draw original image
+                ctx.drawImage(img, 0, 0);
+                
+                // Get image data
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                
+                // Apply basic contrast enhancement
+                for (let i = 0; i < data.length; i += 4) {
+                    // Convert to grayscale
+                    const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    
+                    // Apply threshold for better text contrast
+                    const newValue = avg > 128 ? 255 : 0;
+                    
+                    data[i] = newValue;     // r
+                    data[i + 1] = newValue; // g
+                    data[i + 2] = newValue; // b
+                }
+                
+                // Put the enhanced image data back on the canvas
+                ctx.putImageData(imageData, 0, 0);
+                
+                return canvas.toDataURL('image/png');
             }
-            
-            // Put the enhanced image data back on the canvas
-            ctx.putImageData(imageData, 0, 0);
-            
-            return canvas.toDataURL('image/png');
         }
 
         // Helper to merge OCR results
@@ -923,15 +1224,25 @@
                 .trim();
         }
         
-        // Use extracted text
+        // Use extracted text (now used only for manual editing)
         function useExtractedText() {
-            const extractedText = document.getElementById('extractedText').value;
-            if (extractedText) {
-                document.getElementById('ingredients').value = extractedText;
-                switchTab('textInput');
-            } else {
-                alert("No text has been extracted yet.");
-            }
+            switchTab('textInput');
+        }
+        
+        // Reset processing to try again
+        function resetProcessing() {
+            document.getElementById('processingSteps').style.display = 'none';
+            document.querySelectorAll('.step-icon').forEach(icon => {
+                icon.classList.remove('active');
+            });
+            
+            document.getElementById('extractedTextContainer').style.display = 'none';
+            document.getElementById('scanningMessage').style.display = 'none';
+            document.getElementById('croppedPreview').style.display = 'none';
+            
+            // Clear overlays
+            const container = document.getElementById('imageContainer');
+            Array.from(container.querySelectorAll('.detection-overlay')).forEach(el => el.remove());
         }
         
         // Ultra-conservative detection algorithm
@@ -959,12 +1270,19 @@
         
         // Test ingredients with API
         async function testIngredients() {
+            // Update progress indicator when coming from auto flow
+            document.getElementById('stepAnalyze').classList.add('active');
+            document.getElementById('ocrProgressText').textContent = 'Analyzing ingredients...';
+            document.getElementById('ocrProgress').style.width = '90%';
+            
             const ingredientsText = document.getElementById('ingredients').value;
             const resultDiv = document.getElementById('result');
             
             if (!ingredientsText.trim()) {
                 resultDiv.className = '';
                 resultDiv.innerHTML = '<div style="color: var(--danger-color);">Please enter ingredients text.</div>';
+                // Hide scanning message if active
+                document.getElementById('scanningMessage').style.display = 'none';
                 return;
             }
             
@@ -1084,16 +1402,23 @@
                 resultHTML += '</details>';
                 
                 resultDiv.innerHTML = resultHTML;
+                
+                // Complete progress
+                document.getElementById('ocrProgress').style.width = '100%';
+                setTimeout(() => {
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    document.getElementById('ocrProgress').style.width = '0%';
+                    
+                    // Scroll to results
+                    resultDiv.scrollIntoView({ behavior: 'smooth' });
+                }, 500);
+                
             } catch (error) {
                 resultDiv.className = '';
                 resultDiv.innerHTML = '<div style="color: var(--danger-color);"><i class="fas fa-exclamation-circle"></i> Error: ' + error.message + '</div>';
+                document.getElementById('scanningMessage').style.display = 'none';
             }
         }
-
-        // Set photo upload as default active tab on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            switchTab('photoInput');
-        });
     </script>
 </body>
 </html>
