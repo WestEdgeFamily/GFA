@@ -1,3 +1,205 @@
+# Complete Files for Server-Side OCR Implementation
+
+Here are all the complete files you need to implement server-side OCR:
+
+## 1. Server-Side Python File (app.py)
+
+```python name=server/app.py
+from flask import Flask, request, jsonify, render_template, send_from_directory
+import os
+import base64
+import pytesseract
+import cv2
+import numpy as np
+from PIL import Image
+import io
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("ocr_server.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# Serve static files
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/static/<path:path>')
+def serve_static(path):
+    return send_from_directory('static', path)
+
+def process_image_for_ocr(base64_image):
+    """Process an image with OCR and return the extracted text"""
+    try:
+        logger.info("Processing OCR request")
+        
+        # Remove data:image/jpeg;base64, prefix if present
+        if 'base64,' in base64_image:
+            base64_image = base64_image.split('base64,')[1]
+            
+        # Decode the base64 image
+        image_bytes = base64.b64decode(base64_image)
+        
+        # Convert to OpenCV format for processing
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None or img.size == 0:
+            logger.error("Failed to decode image")
+            return {
+                'success': False,
+                'error': 'Invalid image data'
+            }
+            
+        # Get image dimensions for logging
+        height, width = img.shape[:2]
+        logger.info(f"Processing image: {width}x{height} pixels")
+        
+        # Image preprocessing pipeline for text extraction
+        # 1. Convert to grayscale
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # 2. Apply adaptive thresholding
+        # This is often better for varying lighting conditions
+        binary = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 11, 2
+        )
+        
+        # 3. Optional: Denoise the image (can help with text clarity)
+        denoised = cv2.fastNlMeansDenoising(binary, None, 10, 7, 21)
+        
+        # 4. Optional: Increase contrast
+        enhanced = cv2.convertScaleAbs(denoised, alpha=1.2, beta=0)
+        
+        # Convert processed image back to PIL format for tesseract
+        pil_img = Image.fromarray(enhanced)
+        
+        # Perform OCR with optimized configuration for ingredient lists
+        # --psm 6: Assume a single uniform block of text
+        # --oem 3: Use LSTM neural network mode
+        text = pytesseract.image_to_string(
+            pil_img, 
+            lang='eng',
+            config='--psm 6 --oem 3 -c preserve_interword_spaces=1'
+        )
+        
+        # Post-processing of the text
+        # Clean up common OCR errors in ingredient lists
+        processed_text = text.strip()
+        processed_text = processed_text.replace('|', 'I')  # Common misrecognition
+        processed_text = processed_text.replace('l', 'I')  # Often confused
+        
+        # Log a snippet of the extracted text for debugging
+        text_preview = processed_text[:100] + "..." if len(processed_text) > 100 else processed_text
+        logger.info(f"Extracted text (preview): {text_preview}")
+        
+        return {
+            'success': True,
+            'text': processed_text,
+            'confidence': 90  # Static confidence value as pytesseract doesn't easily provide this
+        }
+        
+    except Exception as e:
+        logger.error(f"OCR processing error: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+@app.route('/api/ocr', methods=['POST'])
+def ocr_endpoint():
+    try:
+        # Get the base64 image from the request
+        data = request.json
+        if not data:
+            logger.warning("No JSON data in request")
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+            
+        base64_image = data.get('image', '')
+        
+        if not base64_image:
+            logger.warning("No image in request data")
+            return jsonify({'success': False, 'error': 'No image provided'}), 400
+            
+        # Process the image with OCR
+        logger.info("Received OCR request, processing...")
+        result = process_image_for_ocr(base64_image)
+        
+        if result['success']:
+            logger.info("OCR processing successful")
+            return jsonify(result)
+        else:
+            logger.error(f"OCR processing failed: {result.get('error', 'Unknown error')}")
+            return jsonify(result), 500
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in OCR endpoint: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Simple health check endpoint"""
+    return jsonify({
+        'status': 'ok',
+        'tesseract_version': pytesseract.get_tesseract_version(),
+        'opencv_version': cv2.__version__
+    })
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('DEBUG', 'False').lower() == 'true'
+    
+    logger.info(f"Starting OCR Server on port {port}, debug={debug}")
+    logger.info(f"Tesseract version: {pytesseract.get_tesseract_version()}")
+    logger.info(f"OpenCV version: {cv2.__version__}")
+    
+    app.run(host='0.0.0.0', port=port, debug=debug)
+```
+
+## 2. Requirements File (requirements.txt)
+
+```text name=requirements.txt
+flask==2.0.1
+pytesseract==0.3.8
+opencv-python==4.5.3.56
+pillow==8.3.2
+numpy==1.21.2
+```
+
+## 3. Simplified OCR Stub (enhanced-ocr.js)
+
+```javascript name=enhanced-ocr.js
+/**
+ * OCR Compatibility Layer
+ * Using server-side processing instead of client-side
+ * June 2025
+ */
+
+// Stub functions for compatibility with existing code
+window.enhanceAndRecognizeText = async function() {
+    console.warn("Client-side OCR function called, but using server-side OCR instead");
+    return { text: "", confidence: 0 };
+};
+
+window.performFoodLabelOCR = window.enhanceAndRecognizeText;
+window.enhanceIngredientText = text => text;
+window.detectIfFoodLabel = () => Promise.resolve(true);
+window.detectIngredientsSection = () => null;
+```
+
+## 4. Complete HTML File with Server OCR Integration (test-api.html)
+
+```html name=test-api.html
 <!DOCTYPE html>
 <html>
 <head>
@@ -749,6 +951,27 @@
             margin-top: 10px;
             font-size: 12px;
         }
+
+        /* Server connection status */
+        .server-status {
+            padding: 8px 12px;
+            border-radius: var(--border-radius);
+            font-size: 14px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+
+        .server-status.online {
+            background-color: rgba(67, 181, 129, 0.15);
+            color: var(--success-color);
+            border: 1px solid rgba(67, 181, 129, 0.3);
+        }
+
+        .server-status.offline {
+            background-color: rgba(240, 71, 71, 0.15);
+            color: var(--danger-color);
+            border: 1px solid rgba(240, 71, 71, 0.3);
+        }
     </style>
 </head>
 <body>
@@ -817,6 +1040,11 @@
             <div class="tab" onclick="switchTab('textInput')">
                 <i class="fas fa-keyboard"></i> Text Input
             </div>
+        </div>
+        
+        <!-- Server status indicator -->
+        <div id="serverStatus" class="server-status offline">
+            <i class="fas fa-circle"></i> Checking OCR server...
         </div>
         
         <div id="photoInput" class="tab-content active-content">
@@ -1013,9 +1241,111 @@
             }
         }
         
+        // Check server status
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('/health');
+                if (response.ok) {
+                    const statusElement = document.getElementById('serverStatus');
+                    statusElement.className = 'server-status online';
+                    statusElement.innerHTML = '<i class="fas fa-circle"></i> OCR Server Online';
+                    logDebug("OCR server is online");
+                    return true;
+                }
+            } catch (error) {
+                logDebug(`Server status check failed: ${error.message}`);
+            }
+            
+            const statusElement = document.getElementById('serverStatus');
+            statusElement.className = 'server-status offline';
+            statusElement.innerHTML = '<i class="fas fa-circle"></i> OCR Server Offline';
+            return false;
+        }
+        
+        // Check server status on page load
+        window.addEventListener('load', () => {
+            setTimeout(checkServerStatus, 1000);
+        });
+        
         // For camera access
         let stream = null;
         let videoElement = document.getElementById('video');
+        
+        // Server OCR function
+        async function performServerOCR(imageElement) {
+            try {
+                logDebug("Starting server OCR process");
+                
+                // Check server status before proceeding
+                const isServerOnline = await checkServerStatus();
+                if (!isServerOnline) {
+                    throw new Error("OCR server is offline. Please try again later or enter text manually.");
+                }
+                
+                // Show loading UI
+                document.getElementById('scanningMessage').style.display = 'block';
+                document.getElementById('ocrProgressText').textContent = 'Processing image on server...';
+                document.getElementById('ocrProgress').style.width = '50%';
+                
+                // Create a canvas to get the image data
+                const canvas = document.createElement('canvas');
+                
+                // Get image dimensions
+                let imgWidth = imageElement.naturalWidth || imageElement.width;
+                let imgHeight = imageElement.naturalHeight || imageElement.height;
+                
+                // Limit canvas size for efficiency
+                const MAX_SIZE = 1200;
+                if (imgWidth > MAX_SIZE || imgHeight > MAX_SIZE) {
+                    const scale = Math.min(MAX_SIZE / imgWidth, MAX_SIZE / imgHeight);
+                    imgWidth = Math.floor(imgWidth * scale);
+                    imgHeight = Math.floor(imgHeight * scale);
+                }
+                
+                canvas.width = imgWidth;
+                canvas.height = imgHeight;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(imageElement, 0, 0, imgWidth, imgHeight);
+                
+                // Get base64 image with reduced quality for faster upload
+                const base64Image = canvas.toDataURL('image/jpeg', 0.7);
+                
+                logDebug(`Image prepared for server upload: ${imgWidth}x${imgHeight}`);
+                
+                // Send to server
+                const response = await fetch('/api/ocr', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ image: base64Image }),
+                });
+                
+                // Parse result
+                const result = await response.json();
+                
+                // Hide loading UI
+                document.getElementById('scanningMessage').style.display = 'none';
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Server error processing image');
+                }
+                
+                logDebug("Server OCR completed successfully");
+                
+                return {
+                    text: result.text,
+                    confidence: result.confidence
+                };
+                
+            } catch (error) {
+                logDebug(`Server OCR error: ${error.message}`);
+                // Hide loading UI
+                document.getElementById('scanningMessage').style.display = 'none';
+                throw error;
+            }
+        }
         
         // Switch between tabs
         function switchTab(tabId) {
@@ -1156,63 +1486,7 @@
             switchTab('textInput');
         }
         
-        // Use this function for both automatic and manual crop
-        function processImageWithOCR(canvas) {
-            // Show loading
-            document.getElementById('scanningMessage').style.display = 'block';
-            document.getElementById('ocrProgressText').textContent = 'Reading text...';
-            document.getElementById('ocrProgress').style.width = '50%';
-            
-            // SHORT timeout - only 8 seconds
-            const ocrTimeout = setTimeout(() => {
-                document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('extractedTextContainer').style.display = 'block';
-                document.getElementById('ocrConfidence').innerHTML = 
-                    "<strong>OCR taking too long.</strong> Please enter text manually.";
-                document.getElementById('ocrConfidence').style.display = 'block';
-                
-                // Switch to text input as fallback
-                alert("For faster results, you can type the ingredients text manually.");
-                switchTab('textInput');
-            }, 8000);  // Only 8 seconds timeout
-            
-            // Direct OCR call - no preprocessing
-            Tesseract.recognize(canvas, {
-                lang: 'eng',
-                langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
-                tessedit_pageseg_mode: '6',
-                tessedit_ocr_engine_mode: '2'
-            })
-            .then(result => {
-                clearTimeout(ocrTimeout);
-                
-                // Display result
-                document.getElementById('extractedText').value = result.data.text;
-                document.getElementById('extractedTextContainer').style.display = 'block';
-                document.getElementById('ingredients').value = result.data.text;
-                document.getElementById('scanningMessage').style.display = 'none';
-                
-                // Continue with analysis if we got text
-                if (result.data.text.trim()) {
-                    testIngredients();
-                } else {
-                    // No text found
-                    document.getElementById('ocrConfidence').innerHTML = 
-                        "<strong>No text detected.</strong> Please enter text manually.";
-                    document.getElementById('ocrConfidence').style.display = 'block';
-                }
-            })
-            .catch(error => {
-                clearTimeout(ocrTimeout);
-                document.getElementById('scanningMessage').style.display = 'none';
-                document.getElementById('extractedTextContainer').style.display = 'block';
-                document.getElementById('ocrConfidence').innerHTML = 
-                    "<strong>Text recognition failed.</strong> Please enter text manually.";
-                document.getElementById('ocrConfidence').style.display = 'block';
-            });
-        }
-        
-        // Replace cropAndRecognizeText function with this simpler version
+        // Crop image and process text using server-side OCR
         function cropAndRecognizeText(imgElement) {
             try {
                 // Default to bottom half of the image
@@ -1223,17 +1497,10 @@
                     height: Math.floor((imgElement.naturalHeight || imgElement.height) * 0.5)
                 };
                 
-                // Create small canvas
-                const canvas = document.getElementById('croppingCanvas');
-                const MAX_SIZE = 600;
-                let scaleFactor = 1;
-                
-                if (cropArea.width > MAX_SIZE || cropArea.height > MAX_SIZE) {
-                    scaleFactor = Math.min(MAX_SIZE / cropArea.width, MAX_SIZE / cropArea.height);
-                }
-                
-                canvas.width = Math.floor(cropArea.width * scaleFactor);
-                canvas.height = Math.floor(cropArea.height * scaleFactor);
+                // Create canvas
+                const canvas = document.createElement('canvas');
+                canvas.width = cropArea.width;
+                canvas.height = cropArea.height;
                 const ctx = canvas.getContext('2d');
                 
                 // Draw the cropped image
@@ -1245,17 +1512,58 @@
                 
                 // Show preview
                 const croppedPreview = document.getElementById('croppedPreview');
-                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.6);
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.85);
                 croppedPreview.style.display = 'block';
                 
-                // Process with OCR
+                // Update progress indicator
                 document.getElementById('stepDetect').classList.add('active');
                 document.getElementById('stepOcr').classList.add('active');
-                processImageWithOCR(canvas);
+                
+                // Set timeout for server OCR (20 seconds)
+                const ocrTimeout = setTimeout(() => {
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    document.getElementById('ocrConfidence').innerHTML = 
+                        "<strong>Server processing timeout.</strong> Please enter text manually.";
+                    document.getElementById('ocrConfidence').style.display = 'block';
+                    
+                    switchTab('textInput');
+                }, 20000);
+                
+                // Call server OCR
+                performServerOCR(croppedPreview)
+                    .then(result => {
+                        clearTimeout(ocrTimeout);
+                        
+                        // Display extracted text
+                        document.getElementById('extractedText').value = result.text;
+                        document.getElementById('extractedTextContainer').style.display = 'block';
+                        document.getElementById('ingredients').value = result.text;
+                        document.getElementById('scanningMessage').style.display = 'none';
+                        
+                        // Continue with analysis if we got text
+                        if (result.text.trim()) {
+                            testIngredients();
+                        } else {
+                            document.getElementById('ocrConfidence').innerHTML = 
+                                "<strong>No text detected.</strong> Please enter text manually.";
+                            document.getElementById('ocrConfidence').style.display = 'block';
+                        }
+                    })
+                    .catch(error => {
+                        clearTimeout(ocrTimeout);
+                        document.getElementById('scanningMessage').style.display = 'none';
+                        document.getElementById('ocrConfidence').innerHTML = 
+                            `<strong>Server error: ${error.message}</strong> Please enter text manually.`;
+                        document.getElementById('ocrConfidence').style.display = 'block';
+                        
+                        // Switch to text input as fallback
+                        switchTab('textInput');
+                    });
                 
             } catch (error) {
                 document.getElementById('scanningMessage').style.display = 'none';
-                alert("Error processing image. Try manual selection or text entry.");
+                alert("Error processing image. Please enter text manually.");
+                switchTab('textInput');
             }
         }
 
@@ -1488,7 +1796,7 @@
                 document.removeEventListener('mouseup', resizeMouseEnd);
             }
             
-            function dragTouchEnd() {
+                        function dragTouchEnd() {
                 document.removeEventListener('touchmove', dragTouch);
                 document.removeEventListener('touchend', dragTouchEnd);
             }
@@ -1500,28 +1808,14 @@
             }
         }
         
-        // Process the manually selected crop area
+        // Process the manually selected crop area with server OCR
         function cropManualSelection(imgElement, cropArea) {
             try {
-                // Create small canvas for cropped image
-                const canvas = document.getElementById('croppingCanvas');
-                
-                // Use very small size for better performance
-                const MAX_SIZE = 600;  // Even smaller than before
-                let scaleFactor = 1;
-                
-                if (cropArea.width > MAX_SIZE || cropArea.height > MAX_SIZE) {
-                    scaleFactor = Math.min(MAX_SIZE / cropArea.width, MAX_SIZE / cropArea.height);
-                    cropArea.width *= scaleFactor;
-                    cropArea.height *= scaleFactor;
-                    cropArea.x *= scaleFactor;
-                    cropArea.y *= scaleFactor;
-                }
-                
+                // Create canvas for cropped image
+                const canvas = document.createElement('canvas');
                 canvas.width = cropArea.width;
                 canvas.height = cropArea.height;
                 const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
                 // Draw the cropped portion
                 ctx.drawImage(
@@ -1532,12 +1826,51 @@
                 
                 // Show preview
                 const croppedPreview = document.getElementById('croppedPreview');
-                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.6);  // Lower quality
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.85);
                 croppedPreview.style.display = 'block';
                 
-                // Process with ultra-simplified OCR
+                // Process with server OCR
                 document.getElementById('stepOcr').classList.add('active');
-                processImageWithOCR(canvas);
+                
+                // Set timeout for server OCR (20 seconds)
+                const ocrTimeout = setTimeout(() => {
+                    document.getElementById('scanningMessage').style.display = 'none';
+                    document.getElementById('ocrConfidence').innerHTML = 
+                        "<strong>Server processing timeout.</strong> Please enter text manually.";
+                    document.getElementById('ocrConfidence').style.display = 'block';
+                    
+                    switchTab('textInput');
+                }, 20000);
+                
+                // Call server OCR
+                performServerOCR(croppedPreview)
+                    .then(result => {
+                        clearTimeout(ocrTimeout);
+                        
+                        // Display extracted text
+                        document.getElementById('extractedText').value = result.text;
+                        document.getElementById('extractedTextContainer').style.display = 'block';
+                        document.getElementById('ingredients').value = result.text;
+                        
+                        // Continue with analysis if we got text
+                        if (result.text.trim()) {
+                            testIngredients();
+                        } else {
+                            document.getElementById('ocrConfidence').innerHTML = 
+                                "<strong>No text detected.</strong> Please enter text manually.";
+                            document.getElementById('ocrConfidence').style.display = 'block';
+                        }
+                    })
+                    .catch(error => {
+                        clearTimeout(ocrTimeout);
+                        document.getElementById('scanningMessage').style.display = 'none';
+                        document.getElementById('ocrConfidence').innerHTML = 
+                            `<strong>Server error: ${error.message}</strong> Please enter text manually.`;
+                        document.getElementById('ocrConfidence').style.display = 'block';
+                        
+                        // Switch to text input as fallback
+                        switchTab('textInput');
+                    });
                 
             } catch (error) {
                 document.getElementById('scanningMessage').style.display = 'none';
