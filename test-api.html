@@ -56,6 +56,45 @@
             margin-bottom: 25px;
         }
 
+        .intro-container {
+            background-color: var(--bg-secondary);
+            padding: 25px;
+            border-radius: var(--border-radius);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            margin-bottom: 25px;
+            border-left: 4px solid var(--accent-color);
+        }
+
+        .intro-container h2 {
+            margin-top: 0;
+            color: var(--accent-color);
+        }
+
+        .app-features {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .feature-card {
+            flex: 1 1 250px;
+            background-color: var(--bg-tertiary);
+            padding: 15px;
+            border-radius: var(--border-radius);
+            border-top: 3px solid var(--accent-color);
+        }
+
+        .feature-card i {
+            font-size: 24px;
+            color: var(--accent-color);
+            margin-bottom: 10px;
+        }
+
+        .feature-card h3 {
+            margin-top: 0;
+        }
+
         .tabs {
             display: flex;
             margin-bottom: 20px;
@@ -497,32 +536,107 @@
           border-radius: var(--border-radius);
           display: none;
         }
+
+        /* Step indicators */
+        .step {
+            display: flex;
+            margin-bottom: 20px;
+            align-items: flex-start;
+        }
+
+        .step-number {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            background-color: var(--accent-color);
+            color: white;
+            border-radius: 50%;
+            font-weight: bold;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex-grow: 1;
+        }
+
+        .step-content h3 {
+            margin-top: 0;
+            margin-bottom: 8px;
+        }
     </style>
 </head>
 <body>
     <h1>Gluten-Free Scanner</h1>
     
+    <!-- New introduction section -->
+    <div class="intro-container">
+        <h2>Welcome to the Gluten-Free Scanner</h2>
+        <p>This tool helps people with celiac disease and gluten sensitivity quickly analyze food ingredient lists to identify potential gluten sources. Simply upload a photo of an ingredients label or type the ingredients text to get an instant safety assessment.</p>
+        
+        <div class="app-features">
+            <div class="feature-card">
+                <i class="fas fa-camera"></i>
+                <h3>Photo Scanning</h3>
+                <p>Take a photo of any ingredient list and our OCR technology will extract the text automatically.</p>
+            </div>
+            <div class="feature-card">
+                <i class="fas fa-search"></i>
+                <h3>Ingredient Analysis</h3>
+                <p>Our specialized algorithm identifies gluten-containing ingredients and hidden sources.</p>
+            </div>
+            <div class="feature-card">
+                <i class="fas fa-shield-alt"></i>
+                <h3>Safety Assessment</h3>
+                <p>Get clear safety ratings with detailed explanations of any flagged ingredients.</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- How to use section -->
+    <div class="container">
+        <h2>How to Use This Tool</h2>
+        
+        <div class="step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+                <h3>Scan or Enter Ingredients</h3>
+                <p>Upload a photo of an ingredient list using your camera or gallery, or manually type the ingredients text.</p>
+            </div>
+        </div>
+        
+        <div class="step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+                <h3>Review the Analysis</h3>
+                <p>The system will identify any potentially unsafe ingredients and provide a safety assessment.</p>
+            </div>
+        </div>
+        
+        <div class="step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+                <h3>Make an Informed Decision</h3>
+                <p>Use the detailed analysis and safety tips to decide whether a product is safe for your dietary needs.</p>
+            </div>
+        </div>
+        
+        <p class="disclaimer" style="margin-top: 20px;"><strong>Important:</strong> Always consult with your healthcare provider for medical advice. This tool is designed as a helpful guide but cannot replace professional medical guidance.</p>
+    </div>
+    
     <div class="container">
         <div class="tabs">
-            <div class="tab active-tab" onclick="switchTab('textInput')">
-                <i class="fas fa-keyboard"></i> Text Input
-            </div>
-            <div class="tab" onclick="switchTab('photoInput')">
+            <div class="tab active-tab" onclick="switchTab('photoInput')">
                 <i class="fas fa-camera"></i> Photo Upload
             </div>
-        </div>
-        
-        <div id="textInput" class="tab-content active-content">
-            <p class="section-title">Enter ingredients text</p>
-            <textarea id="ingredients" placeholder="Enter ingredients list here..."></textarea>
-            <div class="button-row">
-                <button class="primary" onclick="testIngredients()">
-                    <i class="fas fa-search"></i> Analyze Text
-                </button>
+            <div class="tab" onclick="switchTab('textInput')">
+                <i class="fas fa-keyboard"></i> Text Input
             </div>
         </div>
         
-        <div id="photoInput" class="tab-content">
+        <div id="photoInput" class="tab-content active-content">
             <p class="section-title">Upload a photo of ingredients</p>
             <input type="file" id="imageUpload" accept="image/*">
             <label for="imageUpload" class="file-upload-label">
@@ -570,6 +684,16 @@
                 </button>
                 <button id="useTextButton" class="secondary" onclick="useExtractedText()" disabled>
                     <i class="fas fa-check"></i> Use This Text
+                </button>
+            </div>
+        </div>
+        
+        <div id="textInput" class="tab-content">
+            <p class="section-title">Enter ingredients text</p>
+            <textarea id="ingredients" placeholder="Enter ingredients list here..."></textarea>
+            <div class="button-row">
+                <button class="primary" onclick="testIngredients()">
+                    <i class="fas fa-search"></i> Analyze Text
                 </button>
             </div>
         </div>
@@ -965,6 +1089,11 @@
                 resultDiv.innerHTML = '<div style="color: var(--danger-color);"><i class="fas fa-exclamation-circle"></i> Error: ' + error.message + '</div>';
             }
         }
+
+        // Set photo upload as default active tab on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            switchTab('photoInput');
+        });
     </script>
 </body>
 </html>
