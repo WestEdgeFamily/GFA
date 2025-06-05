@@ -454,3 +454,361 @@ async function enhanceAndRecognizeText(imageElement) {
         throw error;
     }
 }
+
+// Specialized function for food label OCR
+async function performFoodLabelOCR(imageElement) {
+    console.log("Starting specialized food label OCR");
+    try {
+        // Step 1: Try to correct orientation if needed
+        const orientedImage = await correctImageOrientation(imageElement);
+        
+        // Step 2: Create multiple processed versions with different techniques
+        const processedImages = await preprocessFoodLabel(orientedImage);
+        
+        // Step 3: Run multiple OCR passes with settings optimized for ingredient lists
+        const results = [];
+        
+        // First pass - Standard settings with high-quality image
+        results.push(await Tesseract.recognize(processedImages[0], {
+            lang: 'eng',
+            langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
+            tessedit_pageseg_mode: '6',  // Assume a single uniform block of text
+        }));
+        
+        // Second pass - Optimized for lines of text
+        results.push(await Tesseract.recognize(processedImages[1], {
+            lang: 'eng',
+            langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
+            tessedit_pageseg_mode: '7', // Treat the image as a single line of text
+            tessjs_create_box: '1',
+            preserve_interword_spaces: '1'
+        }));
+        
+        // Third pass - Try with different preprocessing
+        results.push(await Tesseract.recognize(processedImages[2], {
+            lang: 'eng',
+            langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
+            tessedit_pageseg_mode: '11',  // Sparse text. Find as much text as possible in no particular order
+            tessjs_create_box: '1',
+        }));
+        
+        // Combine and clean results
+        const texts = results.map(r => r.data.text);
+        let bestText = '';
+        
+        // Evaluate the results and pick the best one
+        for (let i = 0; i < texts.length; i++) {
+            // Check if it contains the word INGREDIENTS or key ingredients words
+            if (texts[i].match(/ingredients/i) || 
+                (texts[i].match(/flour|bran|starch|gum|sugar|salt|water/gi) && 
+                 texts[i].length > bestText.length)) {
+                bestText = texts[i];
+            }
+        }
+        
+        // If none of the results seem good, combine them
+        if (!bestText) {
+            bestText = combineOcrResults(results.map(r => r.data));
+        }
+        
+        // Clean up the text
+        const cleanedText = cleanFoodLabelText(bestText);
+        
+        return {
+            text: cleanedText,
+            confidence: Math.max(...results.map(r => r.data.confidence || 0)),
+            rawTexts: texts
+        };
+    } catch (error) {
+        console.error("Error in food label OCR:", error);
+        throw error;
+    }
+}
+
+// Special preprocessing for food labels
+async function preprocessFoodLabel(src) {
+    // Create image and canvas elements
+    const getImageData = async (source) => {
+        // Handle both Image elements and canvas elements
+        if(source.tagName === 'IMG' || source.tagName === 'CANVAS') {
+            // For canvas element
+            if(source.tagName === 'CANVAS') {
+                const ctx = source.getContext('2d');
+                return {
+                    imageData: ctx.getImageData(0, 0, source.width, source.height),
+                    width: source.width,
+                    height: source.height,
+                    canvas: source
+                };
+            } 
+            // For IMG element
+            else {
+                await new Promise(resolve => {
+                    if(source.complete) resolve();
+                    else source.onload = resolve;
+                });
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = source.naturalWidth || source.width;
+                canvas.height = source.naturalHeight || source.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(source, 0, 0);
+                
+                return {
+                    imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
+                    width: canvas.width,
+                    height: canvas.height,
+                    canvas: canvas
+                };
+            }
+        } 
+        // For URL/data URI string
+        else {
+            const img = new Image();
+            await new Promise(resolve => {
+                img.onload = resolve;
+                img.src = source;
+            });
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            return {
+                imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
+                width: canvas.width,
+                height: canvas.height,
+                canvas: canvas
+            };
+        }
+    };
+    
+    // Get image data
+    const { imageData, width, height, canvas } = await getImageData(src);
+    const ctx = canvas.getContext('2d');
+    const data = imageData.data;
+    
+    // Create multiple processed versions optimized for food labels
+    
+    // Canvas 1: High contrast black text on white background
+    const canvas1 = document.createElement('canvas');
+    canvas1.width = width;
+    canvas1.height = height;
+    const ctx1 = canvas1.getContext('2d');
+    
+    // Draw original image
+    ctx1.drawImage(canvas, 0, 0);
+    
+    // Apply contrast enhancement
+    ctx1.globalCompositeOperation = 'multiply';
+    ctx1.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx1.fillRect(0, 0, width, height);
+    
+    // Reset composite operation
+    ctx1.globalCompositeOperation = 'source-over';
+    
+    // Get image data from enhanced image
+    const imageData1 = ctx1.getImageData(0, 0, width, height);
+    const data1 = imageData1.data;
+    
+    // Apply global threshold
+    for (let i = 0; i < data1.length; i += 4) {
+        // Calculate grayscale value
+        const avg = (data1[i] + data1[i+1] + data1[i+2]) / 3;
+        const threshold = 160; // Adjusted for food labels
+        const newVal = avg > threshold ? 255 : 0;
+        data1[i] = data1[i+1] = data1[i+2] = newVal;
+    }
+    
+    ctx1.putImageData(imageData1, 0, 0);
+    
+    // Canvas 2: Adaptive threshold with edge enhancement
+    const canvas2 = document.createElement('canvas');
+    canvas2.width = width;
+    canvas2.height = height;
+    const ctx2 = canvas2.getContext('2d');
+    ctx2.drawImage(canvas, 0, 0);
+    
+    // Enhance edges
+    ctx2.filter = 'contrast(1.5) brightness(1.1)';
+    ctx2.drawImage(canvas2, 0, 0);
+    ctx2.filter = 'none';
+    
+    const imageData2 = ctx2.getImageData(0, 0, width, height);
+    const data2 = imageData2.data;
+    
+    // Apply adaptive threshold
+    const blockSize = Math.max(11, Math.floor(Math.min(width, height) / 15));
+    const C = 7; // Bias value
+    
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            // Calculate local region for adaptive threshold
+            const startX = Math.max(0, x - blockSize);
+            const startY = Math.max(0, y - blockSize);
+            const endX = Math.min(width, x + blockSize);
+            const endY = Math.min(height, y + blockSize);
+            
+            let sum = 0, count = 0;
+            for (let ly = startY; ly < endY; ly++) {
+                for (let lx = startX; lx < endX; lx++) {
+                    const idx = (ly * width + lx) * 4;
+                    const avg = (data2[idx] + data2[idx+1] + data2[idx+2]) / 3;
+                    sum += avg;
+                    count++;
+                }
+            }
+            
+            const mean = sum / count;
+            const idx = (y * width + x) * 4;
+            const pixelAvg = (data2[idx] + data2[idx+1] + data2[idx+2]) / 3;
+            const newValue = pixelAvg < (mean - C) ? 0 : 255;
+            
+            data2[idx] = data2[idx+1] = data2[idx+2] = newValue;
+        }
+    }
+    
+    ctx2.putImageData(imageData2, 0, 0);
+    
+    // Canvas 3: Grayscale with histogram equalization
+    const canvas3 = document.createElement('canvas');
+    canvas3.width = width;
+    canvas3.height = height;
+    const ctx3 = canvas3.getContext('2d');
+    ctx3.drawImage(canvas, 0, 0);
+    
+    const imageData3 = ctx3.getImageData(0, 0, width, height);
+    const data3 = imageData3.data;
+    
+    // Convert to grayscale
+    for (let i = 0; i < data3.length; i += 4) {
+        const gray = 0.3 * data3[i] + 0.59 * data3[i+1] + 0.11 * data3[i+2];
+        data3[i] = data3[i+1] = data3[i+2] = gray;
+    }
+    
+    // Calculate histogram
+    const histogram = new Array(256).fill(0);
+    for (let i = 0; i < data3.length; i += 4) {
+        histogram[data3[i]]++;
+    }
+    
+    // Calculate cumulative distribution function
+    const cdf = new Array(256);
+    cdf[0] = histogram[0];
+    for (let i = 1; i < 256; i++) {
+        cdf[i] = cdf[i-1] + histogram[i];
+    }
+    
+    // Normalize CDF
+    const cdfMin = cdf.find(x => x > 0);
+    for (let i = 0; i < 256; i++) {
+        cdf[i] = Math.round(((cdf[i] - cdfMin) / (data3.length/4 - cdfMin)) * 255);
+    }
+    
+    // Apply equalization
+    for (let i = 0; i < data3.length; i += 4) {
+        data3[i] = data3[i+1] = data3[i+2] = cdf[data3[i]];
+    }
+    
+    // Apply global threshold
+    for (let i = 0; i < data3.length; i += 4) {
+        data3[i] = data3[i+1] = data3[i+2] = data3[i] > 130 ? 255 : 0;
+    }
+    
+    ctx3.putImageData(imageData3, 0, 0);
+    
+    return [
+        canvas1.toDataURL('image/png'),
+        canvas2.toDataURL('image/png'),
+        canvas3.toDataURL('image/png')
+    ];
+}
+
+// Clean and format food label text
+function cleanFoodLabelText(text) {
+    if (!text) return "";
+    
+    // First, normalize whitespace
+    let cleaned = text.replace(/\s+/g, ' ').trim();
+    
+    // Extract ingredient section if possible
+    const ingredientSectionRegex = /ingredients\s*:?\s*([^.]*\.?)/i;
+    const ingredientMatch = cleaned.match(ingredientSectionRegex);
+    if (ingredientMatch && ingredientMatch[1]) {
+        cleaned = "INGREDIENTS: " + ingredientMatch[1].trim();
+    }
+    
+    // Fix common OCR errors specific to food labels
+    const replacements = {
+        'Ingred ents': 'Ingredients',
+        'ingred ents': 'ingredients',
+        'INGRED ENTS': 'INGREDIENTS',
+        'Ingredienis': 'Ingredients',
+        'Ingrediants': 'Ingredients',
+        'Ingredants': 'Ingredients',
+        'inodified': 'modified',
+        'xantnan': 'xanthan',
+        'xaninan': 'xanthan',
+        'xantnem': 'xanthan',
+        'gum,': 'gum.',
+        'flcur': 'flour',
+        'flour,': 'flour,',
+        'bran,': 'bran,',
+        'staren': 'starch',
+        'starcn': 'starch',
+        'sirch': 'starch',
+        'starci': 'starch',
+        'stabilzed': 'stabilized',
+        'siabilized': 'stabilized',
+    };
+    
+    for (const [error, correction] of Object.entries(replacements)) {
+        cleaned = cleaned.replace(new RegExp(error, 'ig'), correction);
+    }
+    
+    // Fix specific formatting for food ingredients
+    cleaned = cleaned
+        .replace(/([A-Za-z]),([A-Za-z])/g, '$1, $2') // Fix missing space after comma
+        .replace(/\s+\./g, '.') // Fix space before period
+        .replace(/\s*\(\s*/g, ' (') // Normalize opening parenthesis
+        .replace(/\s*\)\s*/g, ') ') // Normalize closing parenthesis
+        .replace(/\.\s*,/g, ',') // Fix period before comma
+        .replace(/\.\s*\./g, '.'); // Fix multiple periods
+        
+    return cleaned;
+}
+
+// Function to detect if an image contains food label
+async function detectIfFoodLabel(imageElement) {
+    try {
+        // Quick OCR sample to check for food-related keywords
+        const result = await Tesseract.recognize(imageElement, {
+            lang: 'eng',
+            rectangle: { left: 0, top: 0, width: 0.8, height: 0.8 }
+        });
+        
+        const text = result.data.text.toLowerCase();
+        
+        // Look for food label indicators
+        const foodKeywords = [
+            'ingredients', 'ingred', 'nutrition', 'calories', 
+            'serving', 'flour', 'sugar', 'salt', 'contains',
+            'modified', 'starch', 'water', 'protein', 'fat',
+            'gluten', 'bran', 'gum', 'distributed', 'inc.'
+        ];
+        
+        // Check if any keywords are found
+        return foodKeywords.some(keyword => text.includes(keyword));
+    } catch (e) {
+        console.error("Error in food label detection:", e);
+        return false; // Default to standard OCR on error
+    }
+}
+
+// Make functions available globally
+window.enhanceAndRecognizeText = enhanceAndRecognizeText;
+window.performFoodLabelOCR = performFoodLabelOCR;
+window.enhanceIngredientText = enhanceIngredientText;
+window.detectIfFoodLabel = detectIfFoodLabel;
