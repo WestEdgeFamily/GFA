@@ -1,6 +1,7 @@
 /**
  * Enhanced OCR Module for Gluten-Free Scanner
  * Provides advanced text recognition optimized for ingredient lists
+ * Updated: 2025-06-05
  */
 
 // Perform OCR with settings optimized for ingredient lists
@@ -9,7 +10,7 @@ async function performOCR(image, options) {
     const defaultOptions = {
         lang: 'eng',
         langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/lang-data',
-        tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.():-%;/* ',
+        tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.():-%;/*& ',
         preserve_interword_spaces: '1',
         tessedit_pageseg_mode: '6', // Assume a single uniform block of text
         tessjs_create_box: '0',
@@ -106,6 +107,9 @@ async function preprocessImage(src) {
     // 1. Create a clone of the original image data
     const origData = new Uint8ClampedArray(data);
     
+    // Check if image is small (likely a cropped ingredient section)
+    const isSmallCrop = width < 500 || height < 200;
+    
     // 2. Process with adaptive thresholding (better for varied lighting)
     const blockSize = Math.max(5, Math.floor(Math.min(width, height) / 20));
     
@@ -132,7 +136,7 @@ async function preprocessImage(src) {
             // Apply threshold with slight bias (C value)
             const idx = (y * width + x) * 4;
             const pixelAvg = (data[idx] + data[idx+1] + data[idx+2]) / 3;
-            const C = 5; // Threshold bias
+            const C = isSmallCrop ? 10 : 5; // Higher bias for small crops
             const newValue = pixelAvg < (mean - C) ? 0 : 255;
             
             data[idx] = data[idx+1] = data[idx+2] = newValue;
@@ -174,7 +178,7 @@ async function preprocessImage(src) {
     // Apply fixed thresholding
     for (let i = 0; i < dataCopy.length; i += 4) {
         const avg = (dataCopy[i] + dataCopy[i + 1] + dataCopy[i + 2]) / 3;
-        const threshold = 150;
+        const threshold = isSmallCrop ? 140 : 150; // Lower threshold for ingredient sections
         const newValue = avg > threshold ? 255 : 0;
         
         dataCopy[i] = dataCopy[i + 1] = dataCopy[i + 2] = newValue;
@@ -361,7 +365,16 @@ function enhanceIngredientText(text) {
         'waler': 'water',
         'wafer': 'water',
         'frorn': 'from',
-        'preservatlve': 'preservative'
+        'preservatlve': 'preservative',
+        'emulsi ier': 'emulsifier',
+        'emulsi tier': 'emulsifier',
+        'NIIILK': 'MILK',
+        'NIILK': 'MILK',
+        'lecithin)': 'lecithin),',
+        'WHEATS': 'WHEAT',
+        'NUTS!': 'NUTS',
+        'NUTS1': 'NUTS',
+        'NUTSI': 'NUTS',
     };
     
     for (const [error, correction] of Object.entries(replacements)) {
@@ -374,7 +387,11 @@ function enhanceIngredientText(text) {
         .replace(/\.\s*\./g, '.')
         .replace(/\s+/g, ' ')
         .replace(/([a-z])\,([a-z])/gi, '$1, $2')
-        .replace(/(\w)\:(\w)/g, '$1: $2');
+        .replace(/(\w)\:(\w)/g, '$1: $2')
+        .replace(/([a-z]),([a-z])/gi, '$1, $2') // Fix missing space after comma
+        .replace(/(\d)%(\w)/g, '$1%, $2') // Add space after percentages
+        .replace(/\(([\d\.]+)%\)/g, '($1%)') // Fix percentage formatting in parentheses
+        .replace(/\. /g, ', '); // Replace periods with commas in ingredient lists
     
     // 4. Clean up "contains" statements
     const containsMatch = formatted.match(/contains[\s\:\.]+([^\.]*)(\.|$)/i);
@@ -417,7 +434,7 @@ async function enhanceAndRecognizeText(imageElement) {
         // Second pass: Contrast enhanced image with ingredient-specific character whitelist
         results.push(await performOCR(processedImages[1], { 
             rotateAuto: true,
-            tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.():-%;/* ',
+            tessedit_char_whitelist: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.():-%;/*& ',
             tessjs_create_box: '1'  // Create word boxes for better word recognition
         }));
         
@@ -740,6 +757,13 @@ function cleanFoodLabelText(text) {
         cleaned = "INGREDIENTS: " + ingredientMatch[1].trim();
     }
     
+    // Special ingredient separator handling
+    cleaned = cleaned
+        .replace(/([a-z]),([a-z])/gi, '$1, $2') // Fix missing spaces after commas
+        .replace(/(\d)%(\w)/g, '$1%, $2') // Add space after percentages
+        .replace(/\(([\d\.]+)%\)/g, '($1%)') // Fix percentage formatting in parentheses
+        .replace(/\. /g, ', '); // Replace periods with commas in ingredient lists
+    
     // Fix common OCR errors specific to food labels
     const replacements = {
         'Ingred ents': 'Ingredients',
@@ -752,7 +776,7 @@ function cleanFoodLabelText(text) {
         'xantnan': 'xanthan',
         'xaninan': 'xanthan',
         'xantnem': 'xanthan',
-        'gum,': 'gum.',
+        'gum,': 'gum,',
         'flcur': 'flour',
         'flour,': 'flour,',
         'bran,': 'bran,',
@@ -762,6 +786,16 @@ function cleanFoodLabelText(text) {
         'starci': 'starch',
         'stabilzed': 'stabilized',
         'siabilized': 'stabilized',
+        'emulsi ier': 'emulsifier',
+        'emulsi tier': 'emulsifier',
+        'NIIILK': 'MILK',
+        'NIILK': 'MILK',
+        'lecithin)': 'lecithin),',
+        'TRACES': 'TRACES',
+        'WHEATS': 'WHEAT',
+        'NUTS!': 'NUTS',
+        'NUTS1': 'NUTS',
+        'NUTSI': 'NUTS',
     };
     
     for (const [error, correction] of Object.entries(replacements)) {
@@ -778,6 +812,132 @@ function cleanFoodLabelText(text) {
         .replace(/\.\s*\./g, '.'); // Fix multiple periods
         
     return cleaned;
+}
+
+// Specialized function to detect just the ingredients section of a food label
+async function detectIngredientsSection(imageElement) {
+    try {
+        // First attempt - use OCR to find likely area containing ingredients text
+        const lowResResult = await Tesseract.recognize(imageElement, {
+            lang: 'eng',
+            logger: m => {}, // Suppress progress messages
+            rectangle: { // Only sample part of the image to speed things up
+                top: Math.floor(imageElement.height * 0.5),
+                left: 0,
+                width: imageElement.width,
+                height: Math.floor(imageElement.height * 0.5)
+            }
+        });
+        
+        // Look for the word "ingredients" in the text
+        const lowResText = lowResResult.data.text.toLowerCase();
+        const ingredientsIndex = lowResText.indexOf("ingredients");
+        
+        if (ingredientsIndex >= 0) {
+            console.log("Found ingredients section via OCR");
+            
+            // Get the word position info from Tesseract
+            const words = lowResResult.data.words || [];
+            const ingredientsWord = words.find(word => 
+                word.text.toLowerCase().includes("ingredient")
+            );
+            
+            if (ingredientsWord) {
+                // Extract a region that starts at the ingredients word and extends down
+                // Scale coordinates since we used a smaller rectangle
+                const yOffset = Math.floor(imageElement.height * 0.5); // Offset from rectangle
+                
+                const bbox = {
+                    x: Math.max(0, ingredientsWord.bbox.x0 - 10),
+                    y: ingredientsWord.bbox.y0 + yOffset - 5,
+                    width: imageElement.width - ingredientsWord.bbox.x0 + 10,
+                    height: Math.min(
+                        imageElement.height - ingredientsWord.bbox.y0 - yOffset + 5,
+                        imageElement.height * 0.3 // Limit height to 30% of the image
+                    )
+                };
+                
+                return bbox;
+            }
+        }
+        
+        // Fallback to image analysis method
+        console.log("Ingredients word not found, using pattern detection");
+        
+        // Create a canvas with the image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = imageElement.width;
+        canvas.height = imageElement.height;
+        ctx.drawImage(imageElement, 0, 0);
+        
+        // Get image data
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Look for patterns that typically contain ingredient lists
+        // (small text blocks in the bottom half of the packaging)
+        
+        // 1. Analyze text density in different regions
+        const rowDensity = [];
+        
+        // Skip the top 40% of the image (usually brand/nutrition info)
+        const startY = Math.floor(imageElement.height * 0.4);
+        
+        // Analyze horizontal density of pixels (looking for text blocks)
+        for (let y = startY; y < imageElement.height; y++) {
+            let blackCount = 0;
+            for (let x = 0; x < imageElement.width; x++) {
+                const i = (y * imageElement.width + x) * 4;
+                // Check if pixel is dark (text)
+                const avg = (data[i] + data[i+1] + data[i+2]) / 3;
+                if (avg < 100) blackCount++;
+            }
+            rowDensity.push(blackCount);
+        }
+        
+        // Find the row with maximum density (likely to be in the ingredients section)
+        const maxDensityRow = startY + rowDensity.indexOf(Math.max(...rowDensity));
+        
+        // Look for starting and ending rows of the ingredients block
+        let startRow = maxDensityRow;
+        let endRow = maxDensityRow;
+        
+        // Search for the start of the text block (where density drops)
+        for (let y = maxDensityRow; y > startY; y--) {
+            if (rowDensity[y - startY] < rowDensity[maxDensityRow - startY] * 0.3) {
+                startRow = y + 5; // Add margin
+                break;
+            }
+        }
+        
+        // Search for the end of the text block
+        for (let y = maxDensityRow; y < imageElement.height; y++) {
+            if (rowDensity[y - startY] < rowDensity[maxDensityRow - startY] * 0.3) {
+                endRow = y - 5; // Add margin
+                break;
+            }
+        }
+        
+        // Create bbox for the detected ingredients section
+        const bbox = {
+            x: 0,
+            y: startRow,
+            width: imageElement.width,
+            height: endRow - startRow
+        };
+        
+        return bbox;
+    } catch (error) {
+        console.error("Error detecting ingredients section:", error);
+        // Return a default region in the middle-bottom of the image
+        return {
+            x: 0,
+            y: Math.floor(imageElement.height * 0.6),
+            width: imageElement.width,
+            height: Math.floor(imageElement.height * 0.3)
+        };
+    }
 }
 
 // Function to detect if an image contains food label
@@ -812,3 +972,4 @@ window.enhanceAndRecognizeText = enhanceAndRecognizeText;
 window.performFoodLabelOCR = performFoodLabelOCR;
 window.enhanceIngredientText = enhanceIngredientText;
 window.detectIfFoodLabel = detectIfFoodLabel;
+window.detectIngredientsSection = detectIngredientsSection;
