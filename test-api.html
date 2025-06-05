@@ -6,7 +6,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
     <script src="enhanced-ocr.js"></script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <style>
         :root {
@@ -28,13 +28,14 @@
         }
 
         body {
-            font-family: 'Segoe UI', Arial, sans-serif;
+            font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
             background-color: var(--bg-primary);
             color: var(--text-primary);
             max-width: 900px;
             margin: 0 auto;
             padding: 20px;
             line-height: 1.6;
+            -webkit-tap-highlight-color: transparent;
         }
 
         h1, h2, h3 {
@@ -695,17 +696,20 @@
             position: absolute;
             z-index: 100;
             box-sizing: border-box;
+            border: 2px dashed #00BFFF;
+            background-color: rgba(0, 191, 255, 0.2);
         }
 
         .resize-handle {
-            width: 10px;
-            height: 10px;
+            width: 30px;
+            height: 30px;
             background-color: #00BFFF;
             position: absolute;
-            right: -5px;
-            bottom: -5px;
+            right: -15px;
+            bottom: -15px;
             cursor: se-resize;
             border-radius: 50%;
+            z-index: 101;
         }
 
         .crop-button {
@@ -713,6 +717,37 @@
             bottom: 10px;
             right: 10px;
             z-index: 101;
+            background-color: var(--accent-color);
+            font-size: 16px;
+            padding: 12px 24px;
+        }
+        
+        /* Debug panel */
+        #debugSection {
+            margin-top: 50px;
+            border: 1px solid var(--bg-tertiary);
+            border-radius: var(--border-radius);
+            padding: 15px;
+        }
+        
+        #debugSection summary {
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+            padding: 10px;
+            background-color: var(--bg-tertiary);
+            border-radius: var(--border-radius);
+        }
+        
+        #debugLogOutput {
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            padding: 10px;
+            color: #a0a0a0;
+            margin-top: 10px;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -804,8 +839,14 @@
                 </button>
             </div>
             
-            <div id="cameraContainer">
-                <video id="video" autoplay></video>
+            <div id="skipOcrContainer" style="display: none;">
+                <button class="secondary" onclick="skipToManualEntry()">
+                    <i class="fas fa-forward"></i> Skip to Manual Text Entry
+                </button>
+            </div>
+            
+            <div id="cameraContainer" style="display: none;">
+                <video id="video" autoplay playsinline></video>
                 
                 <div class="camera-guidance">
                     <h4>Tips for Better Scanning:</h4>
@@ -874,7 +915,7 @@
             
             <div id="extractedTextContainer" style="display: none;">
                 <p class="section-title">Extracted text</p>
-                <textarea id="extractedText" placeholder="Text will appear here after scanning..." readonly></textarea>
+                <textarea id="extractedText" placeholder="Text will appear here after scanning..."></textarea>
                 <div id="ocrConfidence"></div>
                 
                 <div class="button-group">
@@ -909,7 +950,70 @@
     <h2>Analysis Results</h2>
     <div id="result">Results will appear here...</div>
     
+    <!-- Debug Panel -->
+    <details id="debugSection" style="margin-top: 50px;">
+      <summary>Debug Information (For Support)</summary>
+      <button onclick="copyDebugLog()" style="margin: 10px 0;">Copy Debug Log</button>
+      <pre id="debugLogOutput">Debug logs will appear here...</pre>
+    </details>
+    
     <script>
+        // Debug log array
+        let debugLog = [];
+        function logDebug(message) {
+            const timestamp = new Date().toISOString();
+            console.log(`${timestamp}: ${message}`);
+            debugLog.push({time: timestamp, message: message});
+            
+            // Update debug log display
+            const debugLogElement = document.getElementById('debugLogOutput');
+            if (debugLogElement) {
+                debugLogElement.textContent = debugLog.map(entry => `${entry.time}: ${entry.message}`).join('\n');
+            }
+        }
+        
+        // Function to copy debug log to clipboard
+        function copyDebugLog() {
+            const debugText = document.getElementById('debugLogOutput').textContent;
+            
+            // Use modern clipboard API if available
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(debugText)
+                    .then(() => {
+                        alert('Debug log copied to clipboard');
+                    })
+                    .catch(err => {
+                        console.error('Failed to copy: ', err);
+                        fallbackCopy();
+                    });
+            } else {
+                fallbackCopy();
+            }
+            
+            // Fallback copy method
+            function fallbackCopy() {
+                // Create temporary textarea
+                const textArea = document.createElement("textarea");
+                textArea.value = debugText;
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                
+                try {
+                    const successful = document.execCommand('copy');
+                    if (successful) {
+                        alert('Debug log copied to clipboard');
+                    } else {
+                        alert('Unable to copy debug log');
+                    }
+                } catch (err) {
+                    alert('Unable to copy debug log: ' + err);
+                }
+                
+                document.body.removeChild(textArea);
+            }
+        }
+        
         // For camera access
         let stream = null;
         let videoElement = document.getElementById('video');
@@ -918,15 +1022,18 @@
         // Load COCO-SSD model for object detection
         async function loadObjectDetectionModel() {
             try {
+                logDebug("Loading object detection model");
                 cocoModel = await cocoSsd.load();
-                console.log("Object detection model loaded");
+                logDebug("Object detection model loaded successfully");
             } catch(error) {
+                logDebug(`Error loading object detection model: ${error.message}`);
                 console.error("Error loading object detection model:", error);
             }
         }
         
         // Load model on page load
         window.addEventListener('DOMContentLoaded', function() {
+            logDebug("Page loaded, initializing app");
             loadObjectDetectionModel();
             switchTab('photoInput');
         });
@@ -942,17 +1049,30 @@
             
             document.getElementById(tabId).classList.add('active-content');
             Array.from(document.querySelectorAll('.tab')).find(tab => tab.textContent.includes(tabId === 'textInput' ? 'Text' : 'Photo')).classList.add('active-tab');
+            
+            logDebug(`Switched to tab: ${tabId}`);
         }
         
         // Open camera
         function openCamera() {
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            logDebug("Attempting to open camera");
+            const constraints = { 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            };
+            
+            navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(s) {
                     stream = s;
                     videoElement.srcObject = stream;
                     document.getElementById('cameraContainer').style.display = 'block';
+                    logDebug("Camera opened successfully");
                 })
                 .catch(function(error) {
+                    logDebug(`Error accessing camera: ${error.message}`);
                     alert("Error accessing camera: " + error.message);
                 });
         }
@@ -960,6 +1080,7 @@
         // Close camera
         function closeCamera() {
             if (stream) {
+                logDebug("Closing camera");
                 stream.getTracks().forEach(track => track.stop());
                 document.getElementById('cameraContainer').style.display = 'none';
             }
@@ -967,14 +1088,17 @@
         
         // Take photo from camera
         function takePhoto() {
+            logDebug("Taking photo from camera");
             const canvas = document.createElement('canvas');
             canvas.width = videoElement.videoWidth;
             canvas.height = videoElement.videoHeight;
             canvas.getContext('2d').drawImage(videoElement, 0, 0);
             
+            logDebug(`Photo taken with dimensions: ${canvas.width}x${canvas.height}`);
+            
             // Convert to image and display
             const imgPreview = document.getElementById('imagePreview');
-            imgPreview.src = canvas.toDataURL('image/jpeg');
+            imgPreview.src = canvas.toDataURL('image/jpeg', 0.85); // Use JPEG with compression
             imgPreview.style.display = 'block';
             
             // Close camera
@@ -988,11 +1112,14 @@
         document.getElementById('imageUpload').addEventListener('change', function(event) {
             const file = event.target.files[0];
             if (file) {
+                logDebug(`File selected: ${file.name}, type: ${file.type}, size: ${file.size} bytes`);
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const imgPreview = document.getElementById('imagePreview');
                     imgPreview.src = e.target.result;
                     imgPreview.style.display = 'block';
+                    
+                    logDebug("File loaded into image preview");
                     
                     // Start automated processing
                     startAutomatedProcessing(imgPreview);
@@ -1003,12 +1130,15 @@
 
         // Function to start automated processing
         function startAutomatedProcessing(imgElement) {
+            logDebug("Starting automated processing");
+            
             // Show processing steps
             document.getElementById('processingSteps').style.display = 'flex';
             document.getElementById('stepUpload').classList.add('active');
             
-            // Show manual crop option
+            // Show manual crop option and skip option
             document.getElementById('manualCropContainer').style.display = 'flex';
+            document.getElementById('skipOcrContainer').style.display = 'flex';
             
             // Reset any previous results
             document.getElementById('extractedTextContainer').style.display = 'none';
@@ -1020,14 +1150,31 @@
             const container = document.getElementById('imageContainer');
             Array.from(container.querySelectorAll('.detection-overlay')).forEach(el => el.remove());
             
+            // Clear any existing crop box
+            const existingCropBox = document.getElementById('cropBox');
+            if (existingCropBox) existingCropBox.remove();
+            
+            const cropButton = document.querySelector('.crop-button');
+            if (cropButton) cropButton.remove();
+            
             // Wait for image to load fully
             if (imgElement.complete) {
+                logDebug("Image already loaded, proceeding with detection");
                 detectIngredientsArea(imgElement);
             } else {
+                logDebug("Waiting for image to load");
                 imgElement.onload = function() {
+                    logDebug("Image loaded, proceeding with detection");
                     detectIngredientsArea(imgElement);
                 };
             }
+        }
+        
+        // Skip OCR and go straight to text entry
+        function skipToManualEntry() {
+            logDebug("User opted to skip OCR and use manual text entry");
+            resetProcessing();
+            switchTab('textInput');
         }
         
         // Detect ingredients area using object detection and specialized text detection
@@ -1039,11 +1186,23 @@
                 document.getElementById('ocrProgressText').textContent = 'Detecting ingredients area...';
                 document.getElementById('ocrProgress').style.width = '20%';
                 
+                logDebug("Starting ingredients area detection");
+                
+                // Set a timeout for the entire detection process
+                const detectionTimeout = setTimeout(() => {
+                    logDebug("Ingredient detection timed out after 30 seconds");
+                    alert("Detection is taking too long. Please use the manual crop option or enter text directly.");
+                    document.getElementById('ocrProgressText').textContent = 'Detection timeout - please try manual options';
+                }, 30000);
+                
                 // Try direct ingredients section detection first
                 try {
+                    logDebug("Attempting specialized ingredients section detection");
                     const ingredientsBbox = await window.detectIngredientsSection(imgElement);
+                    clearTimeout(detectionTimeout);
+                    
                     if (ingredientsBbox) {
-                        console.log("Detected ingredients section:", ingredientsBbox);
+                        logDebug(`Detected ingredients section: x=${ingredientsBbox.x}, y=${ingredientsBbox.y}, w=${ingredientsBbox.width}, h=${ingredientsBbox.height}`);
                         
                         // Add visual indicator for detected ingredients area
                         const container = document.getElementById('imageContainer');
@@ -1068,80 +1227,107 @@
                         return;
                     }
                 } catch (error) {
-                    console.error("Error during ingredients detection:", error);
+                    clearTimeout(detectionTimeout);
+                    logDebug(`Error during specialized ingredients detection: ${error.message}`);
                 }
                 
                 // If ingredients detection fails, fall back to object detection
-                console.log("Falling back to object detection");
+                logDebug("Falling back to object detection");
                 
                 // If model is not loaded, try loading it
                 if (!cocoModel) {
-                    await loadObjectDetectionModel();
+                    logDebug("Object detection model not loaded, attempting to load it now");
+                    try {
+                        await loadObjectDetectionModel();
+                    } catch (loadError) {
+                        logDebug(`Failed to load model: ${loadError.message}`);
+                    }
                 }
                 
                 if (cocoModel) {
                     // Use object detection to find text areas
-                    const predictions = await cocoModel.detect(imgElement);
-                    
-                    // Look for text or books or similar objects that might contain ingredients
-                    const textRelatedObjects = predictions.filter(pred => 
-                        ['book', 'text', 'label', 'paper', 'box', 'bottle'].includes(pred.class) ||
-                        pred.score > 0.7 // If high confidence, include it
-                    );
-                    
-                    if (textRelatedObjects.length > 0) {
-                        // Found potential text areas, create crop boundaries
-                        console.log("Found potential text areas:", textRelatedObjects);
+                    try {
+                        logDebug("Running object detection");
+                        const predictions = await cocoModel.detect(imgElement);
+                        logDebug(`Object detection returned ${predictions.length} predictions`);
                         
-                        // Use the highest confidence prediction for cropping
-                        const bestMatch = textRelatedObjects.reduce((best, current) => 
-                            current.score > best.score ? current : best, textRelatedObjects[0]);
+                        // Look for text or books or similar objects that might contain ingredients
+                        const textRelatedObjects = predictions.filter(pred => 
+                            ['book', 'text', 'label', 'paper', 'box', 'bottle'].includes(pred.class) ||
+                            pred.score > 0.7 // If high confidence, include it
+                        );
                         
-                        // Add visual indicator of detected area
-                        const container = document.getElementById('imageContainer');
-                        const overlay = document.createElement('div');
-                        overlay.className = 'detection-overlay';
-                        
-                        // Calculate position relative to the image
-                        const imgRect = imgElement.getBoundingClientRect();
-                        const scaleX = imgElement.width / imgElement.naturalWidth;
-                        const scaleY = imgElement.height / imgElement.naturalHeight;
-                        
-                        overlay.style.left = `${bestMatch.bbox[0] * scaleX}px`;
-                        overlay.style.top = `${bestMatch.bbox[1] * scaleY}px`;
-                        overlay.style.width = `${bestMatch.bbox[2] * scaleX}px`;
-                        overlay.style.height = `${bestMatch.bbox[3] * scaleY}px`;
-                        
-                        container.appendChild(overlay);
-                        
-                        // Continue with cropping and OCR
-                        cropAndRecognizeText(imgElement, bestMatch.bbox);
-                    } else {
-                        // No text areas found with object detection, use entire image
-                        console.log("No specific text areas detected, processing full image");
+                        if (textRelatedObjects.length > 0) {
+                            // Found potential text areas, create crop boundaries
+                            logDebug(`Found ${textRelatedObjects.length} potential text areas`);
+                            
+                            // Use the highest confidence prediction for cropping
+                            const bestMatch = textRelatedObjects.reduce((best, current) => 
+                                current.score > best.score ? current : best, textRelatedObjects[0]);
+                            
+                            logDebug(`Using best match: class=${bestMatch.class}, confidence=${bestMatch.score}`);
+                            
+                            // Add visual indicator of detected area
+                            const container = document.getElementById('imageContainer');
+                            const overlay = document.createElement('div');
+                            overlay.className = 'detection-overlay';
+                            
+                            // Calculate position relative to the image
+                            const imgRect = imgElement.getBoundingClientRect();
+                            const scaleX = imgElement.width / imgElement.naturalWidth;
+                            const scaleY = imgElement.height / imgElement.naturalHeight;
+                            
+                            overlay.style.left = `${bestMatch.bbox[0] * scaleX}px`;
+                            overlay.style.top = `${bestMatch.bbox[1] * scaleY}px`;
+                            overlay.style.width = `${bestMatch.bbox[2] * scaleX}px`;
+                            overlay.style.height = `${bestMatch.bbox[3] * scaleY}px`;
+                            
+                            container.appendChild(overlay);
+                            
+                            // Continue with cropping and OCR
+                            cropAndRecognizeText(imgElement, bestMatch.bbox);
+                        } else {
+                            // No text areas found with object detection, use entire image
+                            logDebug("No specific text areas detected, processing full image");
+                            cropAndRecognizeText(imgElement);
+                        }
+                    } catch (detectionError) {
+                        logDebug(`Object detection error: ${detectionError.message}`);
                         cropAndRecognizeText(imgElement);
                     }
                 } else {
                     // If model failed to load, process the full image
-                    console.log("Object detection model not available, processing full image");
+                    logDebug("Object detection model not available, processing full image");
                     cropAndRecognizeText(imgElement);
                 }
             } catch (error) {
-                console.error("Error during detection:", error);
-                // Fallback to full image processing
+                logDebug(`General error during detection: ${error.message}`);
+                alert("There was an issue detecting the ingredients. Please try manual options.");
+                // Fallback to full image processing or show manual options more prominently
                 cropAndRecognizeText(imgElement);
             }
         }
         
-        // Crop image and process text
+        // Crop image and process text with timeout protection
         async function cropAndRecognizeText(imgElement, bbox = null, ingredientsBbox = null) {
+            logDebug("Starting crop and recognize text function");
+            
+            // Set a timeout to prevent infinite processing
+            const cropTimeout = setTimeout(() => {
+                logDebug("Crop and recognize text timed out after 30 seconds");
+                document.getElementById('scanningMessage').style.display = 'none';
+                alert("Processing is taking too long. Please try manually selecting the ingredients section.");
+            }, 30000);
+            
             try {
                 // Determine cropping area - prioritize ingredients detection
                 let cropArea;
                 if (ingredientsBbox) {
+                    logDebug("Using detected ingredients area for cropping");
                     // Use detected ingredients area
                     cropArea = ingredientsBbox;
                 } else if (bbox) {
+                    logDebug("Using object detection bbox for cropping");
                     // Use object detection bbox (convert format)
                     cropArea = {
                         x: bbox[0],
@@ -1150,6 +1336,7 @@
                         height: bbox[3]
                     };
                 } else {
+                    logDebug("Using full image for cropping");
                     // Default to full image
                     cropArea = {
                         x: 0,
@@ -1161,74 +1348,126 @@
                 
                 // Create canvas for cropped image
                 const canvas = document.getElementById('croppingCanvas');
-                canvas.width = cropArea.width;
-                canvas.height = cropArea.height;
+                
+                // Memory optimization: Limit canvas size for large crops
+                const MAX_DIMENSION = 1200;
+                let scaleFactor = 1;
+                
+                if (cropArea.width > MAX_DIMENSION || cropArea.height > MAX_DIMENSION) {
+                    scaleFactor = Math.min(MAX_DIMENSION / cropArea.width, MAX_DIMENSION / cropArea.height);
+                    logDebug(`Scaling crop by factor ${scaleFactor} to prevent memory issues`);
+                }
+                
+                canvas.width = Math.floor(cropArea.width * scaleFactor);
+                canvas.height = Math.floor(cropArea.height * scaleFactor);
                 const ctx = canvas.getContext('2d');
+                
+                // Clear any previous content
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
                 // Draw only the cropped portion
                 ctx.drawImage(
                     imgElement,
                     cropArea.x, cropArea.y, cropArea.width, cropArea.height, // Source coordinates
-                    0, 0, cropArea.width, cropArea.height // Destination coordinates
+                    0, 0, canvas.width, canvas.height // Destination coordinates
                 );
                 
                 // Display cropped image
                 const croppedPreview = document.getElementById('croppedPreview');
-                croppedPreview.src = canvas.toDataURL('image/png');
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.85); // Use JPEG for better compression
                 croppedPreview.style.display = 'block';
                 
-                // Enhance and recognize the cropped text
-                enhanceAndRecognizeText(canvas);
-            } catch (error) {
-                console.error("Error cropping image:", error);
+                // Clear the timeout since the crop succeeded
+                clearTimeout(cropTimeout);
                 
-                // Fall back to using the whole image
-                try {
-                    const canvas = document.getElementById('croppingCanvas');
-                    canvas.width = imgElement.naturalWidth || imgElement.width;
-                    canvas.height = imgElement.naturalHeight || imgElement.height;
-                    const ctx = canvas.getContext('2d');
-                    
-                    ctx.drawImage(imgElement, 0, 0);
-                    
-                    const croppedPreview = document.getElementById('croppedPreview');
-                    croppedPreview.src = canvas.toDataURL('image/png');
-                    croppedPreview.style.display = 'block';
-                    
-                    enhanceAndRecognizeText(canvas);
-                } catch (fallbackError) {
-                    console.error("Fallback error:", fallbackError);
-                    alert("Error processing image. Please try again or use manual text entry.");
-                    document.getElementById('scanningMessage').style.display = 'none';
-                }
+                // Enhance and recognize the cropped text
+                logDebug("Crop completed, proceeding to OCR");
+                await performEnhancedOCR(canvas);
+            } catch (error) {
+                clearTimeout(cropTimeout);
+                logDebug(`Error cropping image: ${error.message}`);
+                
+                // Fall back to manual options
+                document.getElementById('scanningMessage').style.display = 'none';
+                document.getElementById('manualCropContainer').style.display = 'flex';
+                document.getElementById('skipOcrContainer').style.display = 'flex';
+                
+                alert("Error processing image. Please try using manual selection or text entry.");
             }
         }
         
-        // Enhanced OCR with specialized food label processing
-        async function enhanceAndRecognizeText(imageElement) {
+        // Perform OCR with timeout protection
+        async function performEnhancedOCR(imageElement) {
             // Update progress indicator
             document.getElementById('stepOcr').classList.add('active');
             document.getElementById('ocrProgressText').textContent = 'Extracting text...';
             document.getElementById('ocrProgress').style.width = '50%';
             
+            logDebug("Starting OCR process");
+            
+            // Set a timeout to prevent infinite processing
+            const ocrTimeout = setTimeout(() => {
+                logDebug("OCR timed out after 60 seconds");
+                document.getElementById('scanningMessage').style.display = 'none';
+                document.getElementById('extractedTextContainer').style.display = 'block';
+                document.getElementById('ocrConfidence').style.display = 'block';
+                document.getElementById('ocrConfidence').textContent = 
+                    "⚠️ OCR process timed out. Please edit the text or try again with manual selection.";
+            }, 60000);
+            
             try {
                 // First, detect if this is a food label image
-                const isFoodLabel = await window.detectIfFoodLabel(imageElement);
+                let isFoodLabel = false;
+                try {
+                    logDebug("Checking if image is a food label");
+                    isFoodLabel = await window.detectIfFoodLabel(imageElement);
+                    logDebug(`Food label detection result: ${isFoodLabel}`);
+                } catch (e) {
+                    logDebug(`Error in food label detection: ${e.message}`);
+                }
                 
                 let result;
                 if (isFoodLabel) {
-                    console.log("Food label detected, using specialized OCR");
-                    // Use food label specialized OCR
-                    result = await window.performFoodLabelOCR(imageElement);
+                    logDebug("Using specialized food label OCR");
                     
-                    // For debugging, show the raw text options
+                    // Use food label specialized OCR with its own timeout
+                    const foodLabelPromise = window.performFoodLabelOCR(imageElement);
+                    
+                    // Race against timeout
+                    result = await Promise.race([
+                        foodLabelPromise,
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error("Food label OCR timed out")), 45000)
+                        )
+                    ]);
+                    
+                    // For debugging, log raw text options
                     if (result.rawTexts) {
-                        console.log("Raw OCR results:", result.rawTexts);
+                        logDebug(`OCR produced ${result.rawTexts.length} different results`);
+                        for (let i = 0; i < result.rawTexts.length; i++) {
+                            const preview = result.rawTexts[i]?.substring(0, 50) || '';
+                            logDebug(`Text result ${i+1} preview: "${preview}..."`);
+                        }
                     }
                 } else {
-                    // Use standard OCR
-                    result = await window.enhanceAndRecognizeText(imageElement);
+                    logDebug("Using standard OCR");
+                    
+                    // Use standard OCR with its own timeout
+                    const standardOcrPromise = window.enhanceAndRecognizeText(imageElement);
+                    
+                    // Race against timeout
+                    result = await Promise.race([
+                        standardOcrPromise,
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error("Standard OCR timed out")), 45000)
+                        )
+                    ]);
                 }
+                
+                // Clear the main timeout since we completed successfully
+                clearTimeout(ocrTimeout);
+                
+                logDebug(`OCR completed with confidence: ${result.confidence}`);
                 
                 // Display extracted text
                 document.getElementById('extractedText').value = result.text;
@@ -1236,6 +1475,7 @@
                 
                 // Check confidence and show warning if needed
                 if (result.confidence < 70) {
+                    logDebug(`Low confidence OCR result: ${result.confidence}`);
                     document.getElementById('ocrConfidence').textContent = 
                         `⚠️ Warning: Text recognition confidence is low (${Math.round(result.confidence)}%). ` +
                         `You may want to verify or manually edit the extracted text.`;
@@ -1244,11 +1484,23 @@
                 
                 // Continue with automatic analysis
                 document.getElementById('ingredients').value = result.text;
+                document.getElementById('scanningMessage').style.display = 'none';
                 testIngredients();
                 
             } catch (error) {
+                // Clear the timeout since we got an error
+                clearTimeout(ocrTimeout);
+                
+                logDebug(`Error during OCR: ${error.message}`);
                 console.error("Error during OCR:", error);
-                alert("Error extracting text: " + error.message);
+                
+                // Show extracted text area anyway, but empty or with partial results
+                document.getElementById('extractedTextContainer').style.display = 'block';
+                document.getElementById('ocrConfidence').textContent = 
+                    `⚠️ Error: Text extraction failed (${error.message}). Please enter text manually.`;
+                document.getElementById('ocrConfidence').style.display = 'block';
+                
+                // Hide the loading indicator
                 document.getElementById('scanningMessage').style.display = 'none';
                 document.getElementById('ocrProgress').style.width = '0%';
             }
@@ -1256,11 +1508,15 @@
 
         // Use extracted text
         function useExtractedText() {
+            logDebug("User switching to text input with extracted text");
+            const extractedText = document.getElementById('extractedText').value;
+            document.getElementById('ingredients').value = extractedText;
             switchTab('textInput');
         }
         
         // Reset processing to try again
         function resetProcessing() {
+            logDebug("Resetting processing");
             document.getElementById('processingSteps').style.display = 'none';
             document.querySelectorAll('.step-icon').forEach(icon => {
                 icon.classList.remove('active');
@@ -1284,34 +1540,57 @@
         
         // Enable manual crop functionality
         function enableManualCrop() {
+            logDebug("Enabling manual crop selection");
             const imgContainer = document.getElementById('imageContainer');
             const imgPreview = document.getElementById('imagePreview');
+            
+            // Remove any existing crop box
+            const existingCropBox = document.getElementById('cropBox');
+            if (existingCropBox) existingCropBox.remove();
+            
+            const existingButton = document.querySelector('.crop-button');
+            if (existingButton) existingButton.remove();
             
             // Create a crop selection area
             const cropBox = document.createElement('div');
             cropBox.id = 'cropBox';
-            cropBox.style.position = 'absolute';
-            cropBox.style.border = '2px dashed #00BFFF';
-            cropBox.style.backgroundColor = 'rgba(0, 191, 255, 0.2)';
-            cropBox.style.cursor = 'move';
             
-            // Position it in the center, about where ingredients typically are
+            // Get image dimensions
             const imgRect = imgPreview.getBoundingClientRect();
-            cropBox.style.width = '80%';
-            cropBox.style.height = '25%';
-            cropBox.style.left = '10%';
-            cropBox.style.top = '60%';
+            
+            // Default crop area: position it where ingredients are commonly found
+            // iOS-friendly positioning (absolute values)
+            const boxWidth = imgRect.width * 0.8;
+            const boxHeight = imgRect.height * 0.25;
+            const boxTop = imgRect.top + imgRect.height * 0.6;
+            const boxLeft = imgRect.left + imgRect.width * 0.1;
+            
+            cropBox.style.position = 'absolute';
+            cropBox.style.width = boxWidth + 'px';
+            cropBox.style.height = boxHeight + 'px';
+            cropBox.style.top = (boxTop - imgRect.top) + 'px';
+            cropBox.style.left = (boxLeft - imgRect.left) + 'px';
             
             imgContainer.appendChild(cropBox);
+            
+            // Add resize handle
+            const handle = document.createElement('div');
+            handle.className = 'resize-handle';
+            cropBox.appendChild(handle);
             
             // Make the crop box resizable and draggable
             makeResizableDraggable(cropBox);
             
             // Add a confirm button
             const confirmBtn = document.createElement('button');
-            confirmBtn.className = 'primary crop-button';
+            confirmBtn.className = 'crop-button';
             confirmBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Selection';
-            confirmBtn.onclick = () => {
+            
+            confirmBtn.addEventListener('touchstart', confirmCrop);
+            confirmBtn.addEventListener('mousedown', confirmCrop);
+            
+            function confirmCrop(e) {
+                e.preventDefault();
                 const cropBoxRect = cropBox.getBoundingClientRect();
                 const imgRect = imgPreview.getBoundingClientRect();
                 
@@ -1321,106 +1600,244 @@
                 const width = cropBoxRect.width / imgRect.width * imgPreview.naturalWidth;
                 const height = cropBoxRect.height / imgRect.height * imgPreview.naturalHeight;
                 
+                logDebug(`Manual crop selected: x=${x}, y=${y}, w=${width}, h=${height}`);
+                
                 // Remove the crop interface
                 cropBox.remove();
                 confirmBtn.remove();
                 
                 // Process the manually cropped region
                 cropManualSelection(imgPreview, {x, y, width, height});
-            };
+            }
             
             imgContainer.appendChild(confirmBtn);
         }
 
         // Make an element resizable and draggable
         function makeResizableDraggable(element) {
-            // Implementation of dragging and resizing
             let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
             let isResizing = false;
-            let resizeHandle;
             
-            // Add resize handle
-            const handle = document.createElement('div');
-            handle.className = 'resize-handle';
-            element.appendChild(handle);
+            // Get the resize handle
+            const handle = element.querySelector('.resize-handle');
             
-            handle.onmousedown = startResize;
-            element.onmousedown = dragMouseDown;
-            
-            function startResize(e) {
+            // Touch events for resizing
+            handle.addEventListener('touchstart', function(e) {
                 e.preventDefault();
-                e.stopPropagation();
                 isResizing = true;
-                resizeHandle = this;
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                document.onmouseup = closeDragElement;
-                document.onmousemove = elementResize;
-            }
-            
-            function dragMouseDown(e) {
-                if (isResizing) return;
-                e.preventDefault();
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                document.onmouseup = closeDragElement;
-                document.onmousemove = elementDrag;
-            }
-            
-            function elementDrag(e) {
-                e.preventDefault();
-                pos1 = pos3 - e.clientX;
-                pos2 = pos4 - e.clientY;
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                element.style.top = (element.offsetTop - pos2) + "px";
-                element.style.left = (element.offsetLeft - pos1) + "px";
-            }
-            
-            function elementResize(e) {
-                e.preventDefault();
-                // Calculate new width and height
-                const width = e.clientX - element.getBoundingClientRect().left;
-                const height = e.clientY - element.getBoundingClientRect().top;
                 
-                // Enforce minimum size
-                if (width > 20) element.style.width = width + "px";
-                if (height > 20) element.style.height = height + "px";
+                if (e.touches && e.touches[0]) {
+                    pos3 = e.touches[0].clientX;
+                    pos4 = e.touches[0].clientY;
+                }
+                
+                document.addEventListener('touchmove', touchResize);
+                document.addEventListener('touchend', stopResize);
+            });
+            
+            // Touch events for dragging
+            element.addEventListener('touchstart', function(e) {
+                // Don't start drag if we're on the resize handle
+                if (isResizing || e.target.className.includes('resize-handle')) return;
+                
+                if (e.touches && e.touches[0]) {
+                    pos3 = e.touches[0].clientX;
+                    pos4 = e.touches[0].clientY;
+                }
+                
+                document.addEventListener('touchmove', touchDrag);
+                document.addEventListener('touchend', stopDrag);
+            });
+            
+            // Mouse events for resizing
+            handle.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                isResizing = true;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                
+                document.addEventListener('mousemove', mouseResize);
+                document.addEventListener('mouseup', stopResize);
+            });
+            
+            // Mouse events for dragging
+            element.addEventListener('mousedown', function(e) {
+                // Don't start drag if we're on the resize handle
+                if (isResizing || e.target.className.includes('resize-handle')) return;
+                
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                
+                document.addEventListener('mousemove', mouseDrag);
+                document.addEventListener('mouseup', stopDrag);
+            });
+            
+            // Touch resize function
+            function touchResize(e) {
+                e.preventDefault();
+                
+                if (!isResizing || !e.touches || !e.touches[0]) return;
+                
+                const rect = element.getBoundingClientRect();
+                const containerRect = element.parentElement.getBoundingClientRect();
+                
+                // Calculate new dimensions
+                const newX = e.touches[0].clientX - containerRect.left;
+                const newY = e.touches[0].clientY - containerRect.top;
+                
+                const newWidth = newX - rect.left + containerRect.left;
+                const newHeight = newY - rect.top + containerRect.top;
+                
+                // Apply minimum size
+                if (newWidth > 30) element.style.width = newWidth + 'px';
+                if (newHeight > 30) element.style.height = newHeight + 'px';
             }
             
-            function closeDragElement() {
-                isResizing = false;
-                document.onmouseup = null;
-                document.onmousemove = null;
+            // Touch drag function
+            function touchDrag(e) {
+                e.preventDefault();
+                
+                if (isResizing || !e.touches || !e.touches[0]) return;
+                
+                const touch = e.touches[0];
+                pos1 = pos3 - touch.clientX;
+                pos2 = pos4 - touch.clientY;
+                pos3 = touch.clientX;
+                pos4 = touch.clientY;
+                
+                const containerRect = element.parentElement.getBoundingClientRect();
+                const newTop = element.offsetTop - pos2;
+                const newLeft = element.offsetLeft - pos1;
+                
+                // Keep within parent container
+                if (newTop >= 0 && newTop + element.offsetHeight <= containerRect.height) {
+                    element.style.top = newTop + 'px';
+                }
+                
+                if (newLeft >= 0 && newLeft + element.offsetWidth <= containerRect.width) {
+                    element.style.left = newLeft + 'px';
+                }
             }
-        }
+            
+                            // Mouse resize function
+                function mouseResize(e) {
+                    e.preventDefault();
+                    
+                    if (!isResizing) return;
+                    
+                    const rect = element.getBoundingClientRect();
+                    const containerRect = element.parentElement.getBoundingClientRect();
+                    
+                    // Calculate new dimensions
+                    const newX = e.clientX - containerRect.left;
+                    const newY = e.clientY - containerRect.top;
+                    
+                    const newWidth = newX - rect.left + containerRect.left;
+                    const newHeight = newY - rect.top + containerRect.top;
+                    
+                    // Apply minimum size
+                    if (newWidth > 30) element.style.width = newWidth + 'px';
+                    if (newHeight > 30) element.style.height = newHeight + 'px';
+                }
+                
+                // Mouse drag function
+                function mouseDrag(e) {
+                    e.preventDefault();
+                    
+                    if (isResizing) return;
+                    
+                    pos1 = pos3 - e.clientX;
+                    pos2 = pos4 - e.clientY;
+                    pos3 = e.clientX;
+                    pos4 = e.clientY;
+                    
+                    const containerRect = element.parentElement.getBoundingClientRect();
+                    const newTop = element.offsetTop - pos2;
+                    const newLeft = element.offsetLeft - pos1;
+                    
+                    // Keep within parent container
+                    if (newTop >= 0 && newTop + element.offsetHeight <= containerRect.height) {
+                        element.style.top = newTop + 'px';
+                    }
+                    
+                    if (newLeft >= 0 && newLeft + element.offsetWidth <= containerRect.width) {
+                        element.style.left = newLeft + 'px';
+                    }
+                }
+                
+                // Stop drag functions
+                function stopDrag() {
+                    document.removeEventListener('mousemove', mouseDrag);
+                    document.removeEventListener('mouseup', stopDrag);
+                    document.removeEventListener('touchmove', touchDrag);
+                    document.removeEventListener('touchend', stopDrag);
+                }
+                
+                // Stop resize functions
+                function stopResize() {
+                    isResizing = false;
+                    document.removeEventListener('mousemove', mouseResize);
+                    document.removeEventListener('mouseup', stopResize);
+                    document.removeEventListener('touchmove', touchResize);
+                    document.removeEventListener('touchend', stopResize);
+                }
+            }
 
         // Process the manually selected crop area
         function cropManualSelection(imgElement, cropArea) {
+            logDebug(`Processing manual crop: x=${cropArea.x}, y=${cropArea.y}, w=${cropArea.width}, h=${cropArea.height}`);
+            
+            // Create canvas for cropped image
             const canvas = document.getElementById('croppingCanvas');
+            
+            // Memory optimization: Limit canvas size for large crops
+            const MAX_DIMENSION = 1200;
+            let scaleFactor = 1;
+            
+            if (cropArea.width > MAX_DIMENSION || cropArea.height > MAX_DIMENSION) {
+                scaleFactor = Math.min(MAX_DIMENSION / cropArea.width, MAX_DIMENSION / cropArea.height);
+                cropArea.width *= scaleFactor;
+                cropArea.height *= scaleFactor;
+                cropArea.x *= scaleFactor;
+                cropArea.y *= scaleFactor;
+                logDebug(`Scaling crop by factor ${scaleFactor} to prevent memory issues`);
+            }
+            
             canvas.width = cropArea.width;
             canvas.height = cropArea.height;
             const ctx = canvas.getContext('2d');
             
+            // Clear any previous content
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
             // Draw only the selected portion
-            ctx.drawImage(
-                imgElement,
-                cropArea.x, cropArea.y, cropArea.width, cropArea.height,
-                0, 0, cropArea.width, cropArea.height
-            );
-            
-            // Display cropped image
-            const croppedPreview = document.getElementById('croppedPreview');
-            croppedPreview.src = canvas.toDataURL('image/png');
-            croppedPreview.style.display = 'block';
-            
-            // Show the loading indicator
-            document.getElementById('scanningMessage').style.display = 'block';
-            document.getElementById('ocrProgressText').textContent = 'Processing cropped image...';
-            document.getElementById('ocrProgress').style.width = '20%';
-            
-            // Process the cropped image
-            enhanceAndRecognizeText(canvas);
+            try {
+                ctx.drawImage(
+                    imgElement,
+                    cropArea.x, cropArea.y, cropArea.width, cropArea.height, // Source coordinates
+                    0, 0, canvas.width, canvas.height // Destination coordinates
+                );
+                
+                // Display cropped image
+                const croppedPreview = document.getElementById('croppedPreview');
+                croppedPreview.src = canvas.toDataURL('image/jpeg', 0.85); // Use JPEG with compression
+                croppedPreview.style.display = 'block';
+                
+                // Show the loading indicator
+                document.getElementById('scanningMessage').style.display = 'block';
+                document.getElementById('ocrProgressText').textContent = 'Processing cropped image...';
+                document.getElementById('ocrProgress').style.width = '20%';
+                
+                logDebug("Manual crop successful, proceeding to OCR");
+                
+                // Process the cropped image
+                performEnhancedOCR(canvas);
+            } catch (error) {
+                logDebug(`Error in manual crop: ${error.message}`);
+                alert("Error processing the selected area. Please try selecting a different area or use text input.");
+                document.getElementById('scanningMessage').style.display = 'none';
+            }
         }
         
         // UI function for text enhancement button
@@ -1430,6 +1847,8 @@
             if (!extractedText.trim()) {
                 return;
             }
+            
+            logDebug("Enhancing text format");
             
             // Status update
             const statusElement = document.getElementById('textEnhancementStatus');
@@ -1449,13 +1868,15 @@
                 statusElement.innerHTML = '<i class="fas fa-check-circle"></i> Text formatting improved';
                 statusElement.style.color = 'var(--success-color)';
                 
+                logDebug("Text enhancement completed");
+                
                 // Hide status after a few seconds
                 setTimeout(() => {
                     statusElement.style.display = 'none';
                 }, 3000);
                 
             } catch (error) {
-                console.error("Error enhancing text:", error);
+                logDebug(`Error enhancing text: ${error.message}`);
                 statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Could not enhance text';
                 statusElement.style.color = 'var(--warning-color)';
             }
@@ -1505,6 +1926,8 @@
             resultDiv.className = '';
             resultDiv.innerHTML = '<div style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin" style="font-size:24px;"></i><p>Analyzing ingredients...</p></div>';
             
+            logDebug("Sending ingredients to analysis API");
+            
             try {
                 // API URL
                 const apiUrl = 'https://gluten-free-scanner-api.onrender.com/analyze';
@@ -1518,6 +1941,8 @@
                 });
                 
                 let data = await response.json();
+                
+                logDebug(`API response received: ${data.is_gluten_free ? "Gluten-free" : "Contains gluten"}`);
                 
                 // Apply enhanced safety algorithm
                 data = analyzeIngredientsForSafety(data);
@@ -1630,6 +2055,7 @@
                 }, 500);
                 
             } catch (error) {
+                logDebug(`API error: ${error.message}`);
                 resultDiv.className = '';
                 resultDiv.innerHTML = '<div style="color: var(--danger-color);"><i class="fas fa-exclamation-circle"></i> Error: ' + error.message + '</div>';
                 document.getElementById('scanningMessage').style.display = 'none';
